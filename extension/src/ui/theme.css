@@ -1,0 +1,19 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-spruce: #17322b;
+  --color-copper: #b5653a;
+  --color-copper-light: #d08155;
+  --color-copper-tint: #f3e3d8;
+  --color-copper-ink: #7a3e1f;
+  --color-sage: #8fa89a;
+  --color-mist: #eef1ee;
+  --color-graphite: #262a28;
+  --color-night: #0f1c18;
+  --color-mustard: #b98a16;
+  --color-brick: #a3262a;
+
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+}
