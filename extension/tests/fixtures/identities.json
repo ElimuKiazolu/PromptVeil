@@ -1,0 +1,202 @@
+[
+  {
+    "country": "US",
+    "name": {
+      "value": "Dana Whitfield",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "dana.whitfield@example.com",
+      "source": "Address on example.com, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+1 212 555 0142",
+      "source": "NANP 555-0100 to 555-0199 range, reserved for fictional use."
+    },
+    "nationalId": {
+      "type": "SSN",
+      "value": "987-65-4321",
+      "source": "SSA reserves 987-65-4320 to 987-65-4329 for use in advertising and fiction."
+    }
+  },
+  {
+    "country": "GB",
+    "name": {
+      "value": "Harriet Pemberton",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "harriet.pemberton@example.org",
+      "source": "Address on example.org, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+44 7700 900123",
+      "source": "Ofcom drama range 07700 900000 to 07700 900999."
+    },
+    "nationalId": {
+      "type": "NINO",
+      "value": "QQ 12 34 56 A",
+      "source": "HMRC National Insurance manual NIM39110 gives QQ 12 34 56 A as a format example; the QQ prefix is never allocated."
+    }
+  },
+  {
+    "country": "IN",
+    "name": {
+      "value": "Ananya Venkataraman",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "ananya.venkataraman@example.net",
+      "source": "Address on example.net, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+91 98765 43210",
+      "source": "Made-up number in a valid Indian mobile format; no official fictional range is used, so it is not guaranteed to be unassigned."
+    },
+    "nationalId": {
+      "type": "Aadhaar",
+      "value": "999999990019",
+      "source": "Test Aadhaar number from the UIDAI developer tutorial for the sample authentication client."
+    }
+  },
+  {
+    "country": "BR",
+    "name": {
+      "value": "Rafael Tavares Moreira",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "rafael.moreira@example.com",
+      "source": "Address on example.com, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+55 11 91234-5678",
+      "source": "Made-up number in a valid Brazilian mobile format; no official fictional range is used, so it is not guaranteed to be unassigned."
+    },
+    "nationalId": {
+      "type": "CPF",
+      "value": "111.444.777-35",
+      "source": "Published checksum-valid example from CPF check-digit tutorials (for example valorfinal.com.br), not an official government specimen."
+    }
+  },
+  {
+    "country": "DE",
+    "name": {
+      "value": "Lena Hartmann",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "lena.hartmann@example.org",
+      "source": "Address on example.org, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+49 30 23125 123",
+      "source": "Berlin block 030 23125-000 to -999, which the Bundesnetzagentur reserves for film and TV use according to secondary reports; not checked against the regulator's own notice."
+    },
+    "nationalId": {
+      "type": "Steuer-ID",
+      "value": "65929970489",
+      "source": "Published checksum-valid example (ISO 7064 Mod 11,10) from German tax-ID explainers, not an official government specimen."
+    }
+  },
+  {
+    "country": "FR",
+    "name": {
+      "value": "Camille Duvernay",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "camille.duvernay@example.net",
+      "source": "Address on example.net, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+33 6 12 34 56 78",
+      "source": "Made-up number in a valid French mobile format; no official fictional range is used, so it is not guaranteed to be unassigned."
+    },
+    "nationalId": {
+      "type": "NIR",
+      "value": "2 91 01 75 018 002 68",
+      "source": "Published checksum-valid worked example of the NIR control-key calculation (97 minus the remainder modulo 97) from French mathematics teaching material, not an official government specimen."
+    }
+  },
+  {
+    "country": "ZA",
+    "name": {
+      "value": "Thabo Nkosi",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "thabo.nkosi@example.com",
+      "source": "Address on example.com, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+27 82 123 4567",
+      "source": "Made-up number in a valid South African mobile format; no official fictional range is used, so it is not guaranteed to be unassigned."
+    },
+    "nationalId": {
+      "type": "ID",
+      "value": "9807055009087",
+      "source": "Published checksum-valid example from the Wikipedia article on the South African identity card, not an official government specimen."
+    }
+  },
+  {
+    "country": "SG",
+    "name": {
+      "value": "Jun Hao Lim",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "junhao.lim@example.org",
+      "source": "Address on example.org, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+65 8123 4567",
+      "source": "Made-up number in a valid Singapore mobile format; no official fictional range is used, so it is not guaranteed to be unassigned."
+    },
+    "nationalId": {
+      "type": "NRIC",
+      "value": "S1234567D",
+      "source": "Published checksum-valid example from the open-source singapore-nric validator documentation, not an official government specimen."
+    }
+  },
+  {
+    "country": "CN",
+    "name": {
+      "value": "Li Wenhao",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "li.wenhao@example.net",
+      "source": "Address on example.net, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+86 138 0013 8000",
+      "source": "Made-up number in a valid Chinese mobile format; no official fictional range is used, so it is not guaranteed to be unassigned."
+    },
+    "nationalId": {
+      "type": "Resident ID",
+      "value": "11010519491231002X",
+      "source": "Published checksum-valid example (GB 11643 check-character method) from technical articles on the standard, not an official government specimen."
+    }
+  },
+  {
+    "country": "CA",
+    "name": {
+      "value": "Marc-Andre Tremblay",
+      "source": "Invented fictional name; any resemblance to a real person is coincidental."
+    },
+    "email": {
+      "value": "marcandre.tremblay@example.com",
+      "source": "Address on example.com, a domain reserved for documentation (RFC 2606)."
+    },
+    "phone": {
+      "value": "+1 416 555 0143",
+      "source": "NANP 555-0100 to 555-0199 range, reserved for fictional use."
+    },
+    "nationalId": {
+      "type": "SIN",
+      "value": "046 454 286",
+      "source": "Published checksum-valid example from the Wikipedia article on the social insurance number, described there as fictitious but valid; not an official government specimen."
+    }
+  }
+]
