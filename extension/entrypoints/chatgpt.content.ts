@@ -1,5 +1,7 @@
 export default defineContentScript({
   matches: ['https://chatgpt.com/*'],
   runAt: 'document_idle',
-  main() {},
+  main() {
+    // Site integration is registered here as features land.
+  },
 });
