@@ -3,6 +3,9 @@ import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  // Chrome ignores the flag used to auto-load extensions, so loading is manual:
+  // run `npm run dev`, then "Load unpacked" on .output/chrome-mv3-dev once.
+  webExt: { disabled: true },
   vite: () => ({
     plugins: [tailwindcss()],
   }),
@@ -18,7 +21,8 @@ export default defineConfig({
       'https://claude.ai/*',
     ],
     content_security_policy: {
-      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+      extension_pages:
+        "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
     },
   },
 });
