@@ -68,6 +68,22 @@ export default tseslint.config(
     },
   },
   {
+    // The dev logger is the only place in src/ that may write to the console.
+    files: ['src/shared/devlog.ts'],
+    rules: { 'no-console': 'off' },
+  },
+  {
+    // Adapters drive the page's own editor through the browser's native
+    // editing command; there is no non-deprecated API that does this.
+    files: ['src/adapters/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-deprecated': [
+        'error',
+        { allow: [{ from: 'lib', name: 'execCommand' }] },
+      ],
+    },
+  },
+  {
     files: ['scripts/**/*.ts', 'tests/**/*.ts', 'tests/**/*.tsx'],
     rules: { 'no-console': 'off' },
   },

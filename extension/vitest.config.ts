@@ -1,6 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // Same root alias that WXT sets up for the extension build.
+  resolve: {
+    alias: { '@': fileURLToPath(new URL('.', import.meta.url)) },
+  },
   test: {
     projects: [
       {
@@ -8,14 +13,18 @@ export default defineConfig({
           name: 'core',
           environment: 'node',
           include: ['tests/unit/**/*.test.ts'],
-          exclude: ['tests/unit/ui/**'],
+          exclude: [
+            'tests/unit/ui/**',
+            'tests/unit/content/**',
+            'tests/unit/adapters/**',
+          ],
         },
       },
       {
         test: {
-          name: 'ui',
+          name: 'dom',
           environment: 'jsdom',
-          include: ['tests/unit/ui/**/*.test.{ts,tsx}'],
+          include: ['tests/unit/{ui,content,adapters}/**/*.test.{ts,tsx}'],
         },
       },
     ],
