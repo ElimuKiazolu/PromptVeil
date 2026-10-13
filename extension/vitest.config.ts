@@ -7,6 +7,10 @@ export default defineConfig({
     alias: { '@': fileURLToPath(new URL('.', import.meta.url)) },
   },
   test: {
+    // Locally, leave CPU for the dev server: with the default (threads - 1)
+    // jsdom workers on a 4-thread laptop, workers time out while starting.
+    // CI (which sets CI=true) keeps Vitest's default.
+    ...(process.env.CI ? {} : { maxWorkers: 2 }),
     projects: [
       {
         test: {
