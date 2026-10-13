@@ -4,6 +4,7 @@ import {
   installInterceptor,
   type PromptTransform,
 } from '@/src/content/interceptor.ts';
+import { createSpikeMasker } from '@/src/core/spike-mask.ts';
 import { flush, pressKey, setUp, type Harness } from './harness.ts';
 
 const upperCase: PromptTransform = (text) => text.toUpperCase();
@@ -11,10 +12,14 @@ const upperCase: PromptTransform = (text) => text.toUpperCase();
 describe('installInterceptor', () => {
   let h: Harness;
   let controller: AbortController;
+  let contextValid: boolean;
+  let orphanedCalls: number;
 
   beforeEach(() => {
     h = setUp();
     controller = new AbortController();
+    contextValid = true;
+    orphanedCalls = 0;
   });
 
   afterEach(() => {
@@ -26,6 +31,10 @@ describe('installInterceptor', () => {
       adapter: h.adapter,
       transform,
       signal: controller.signal,
+      isContextValid: () => contextValid,
+      onOrphaned: () => {
+        orphanedCalls += 1;
+      },
     });
   };
 
@@ -94,6 +103,9 @@ describe('installInterceptor', () => {
     h.button.click();
     expect(second.defaultPrevented).toBe(true);
     expect(h.siteSends).toEqual([]);
+    // The transform has started and is waiting.
+    await flush();
+    expect(h.triggered).toBe(0);
     release();
     await flush();
     expect(h.triggered).toBe(1);
@@ -235,7 +247,7 @@ describe('installInterceptor', () => {
 
   it('does not send if the context is invalidated mid-send', async () => {
     let release: () => void = () => undefined;
-    install(
+    const transform = vi.fn<PromptTransform>(
       (text) =>
         new Promise((resolve) => {
           release = () => {
@@ -243,8 +255,11 @@ describe('installInterceptor', () => {
           };
         }),
     );
+    install(transform);
     h.editor.textContent = 'hello';
     pressKey(h.editor, { key: 'Enter' });
+    await flush();
+    expect(transform).toHaveBeenCalledTimes(1);
     controller.abort();
     release();
     await flush();
@@ -261,5 +276,73 @@ describe('installInterceptor', () => {
     expect(event.defaultPrevented).toBe(false);
     expect(h.triggered).toBe(0);
     expect(h.siteSends).toEqual(['hello']);
+  });
+
+  it('runs the transform after the event handler has returned', async () => {
+    const transform = vi.fn(upperCase);
+    install(transform);
+    h.editor.textContent = 'hello';
+    const event = pressKey(h.editor, { key: 'Enter' });
+    expect(event.defaultPrevented).toBe(true);
+    expect(transform).not.toHaveBeenCalled();
+    await flush();
+    expect(transform).toHaveBeenCalledTimes(1);
+  });
+
+  it('blocks a send when the extension context is gone', async () => {
+    const transform = vi.fn(upperCase);
+    install(transform);
+    contextValid = false;
+    h.editor.textContent = 'hello';
+    const event = pressKey(h.editor, { key: 'Enter' });
+    await flush();
+    expect(event.defaultPrevented).toBe(true);
+    expect(orphanedCalls).toBe(1);
+    expect(transform).not.toHaveBeenCalled();
+    expect(h.siteSends).toEqual([]);
+  });
+
+  it('does not send if the context is lost while processing', async () => {
+    install((text) => {
+      contextValid = false;
+      return text.toUpperCase();
+    });
+    h.editor.textContent = 'hello';
+    pressKey(h.editor, { key: 'Enter' });
+    await flush();
+    expect(orphanedCalls).toBe(1);
+    expect(h.triggered).toBe(0);
+    expect(h.siteSends).toEqual([]);
+    expect(h.editor.textContent).toBe('hello');
+  });
+
+  it('leaves a sent prompt masked when the site keeps it in the editor', async () => {
+    install(createSpikeMasker());
+    h.editor.textContent = 'mail dana@example.com';
+    pressKey(h.editor, { key: 'Enter' });
+    await flush();
+    // The site queued the message and left the text in place.
+    expect(h.editor.textContent).toBe('mail standin.1@example.net');
+    await flush();
+    expect(h.editor.textContent).toBe('mail standin.1@example.net');
+
+    const write = vi.spyOn(h.adapter, 'writePrompt');
+    pressKey(h.editor, { key: 'Enter' });
+    await flush();
+    expect(write).not.toHaveBeenCalled();
+    expect(h.siteSends).toEqual([
+      'mail standin.1@example.net',
+      'mail standin.1@example.net',
+    ]);
+  });
+
+  it('masks a send triggered by a synthetic page event', async () => {
+    install(createSpikeMasker());
+    h.editor.textContent = 'mail dana@example.com';
+    h.button.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    );
+    await flush();
+    expect(h.siteSends).toEqual(['mail standin.1@example.net']);
   });
 });

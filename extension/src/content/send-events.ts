@@ -15,7 +15,10 @@ function isInside(container: HTMLElement | null, target: EventTarget | null) {
   );
 }
 
-/** True when the event would make the site send the current prompt. */
+/**
+ * True when the event would make the site send the current prompt. Cheap
+ * checks come first, so ordinary typing returns after a key comparison.
+ */
 export function isSendEvent(adapter: SiteAdapter, event: Event): boolean {
   if (event.type === 'keydown') {
     return (
@@ -41,9 +44,9 @@ export function isSendEvent(adapter: SiteAdapter, event: Event): boolean {
 export const SEND_EVENT_TYPES = ['keydown', 'click', 'submit'] as const;
 
 /**
- * Coordination between instances in the same tab. A live interceptor
- * announces itself with READY when installed and in answer to PING, so a
- * guard left behind by an invalidated instance can stand down.
+ * Dispatched on window when an instance starts. Older instances in the same
+ * tab retire into the block-only guard. Page scripts can forge this event,
+ * which is acceptable only because it can never reduce protection: the
+ * worst outcome is that sends are blocked.
  */
-export const INSTANCE_READY_EVENT = 'promptveil:interceptor-ready';
-export const INSTANCE_PING_EVENT = 'promptveil:interceptor-ping';
+export const INSTANCE_STARTED_EVENT = 'promptveil:instance-started';

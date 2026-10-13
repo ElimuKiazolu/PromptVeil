@@ -1,23 +1,23 @@
 import { createChatGptAdapter } from '@/src/adapters/chatgpt.ts';
-import { installInterceptor } from '@/src/content/interceptor.ts';
-import { installSendGuard } from '@/src/content/send-guard.ts';
+import { startInstance } from '@/src/content/instance.ts';
 import { createSpikeMasker } from '@/src/core/spike-mask.ts';
+import { devlog } from '@/src/shared/devlog.ts';
+import { isExtensionContextValid } from '@/src/shared/extension-context.ts';
 
 export default defineContentScript({
   matches: ['https://chatgpt.com/*'],
   // Listen from the start so no send can slip through before the page settles.
   runAt: 'document_start',
   main(ctx) {
+    devlog('instance.starting');
     const adapter = createChatGptAdapter();
     if (!adapter.matches(new URL(location.href))) return;
 
-    installInterceptor({
+    startInstance({
       adapter,
       transform: createSpikeMasker(),
+      isContextValid: isExtensionContextValid,
       signal: ctx.signal,
-    });
-    ctx.onInvalidated(() => {
-      installSendGuard(adapter);
     });
   },
 });

@@ -1,19 +1,18 @@
 import { AdapterError, type SiteAdapter } from '@/src/adapters/types.ts';
 import { devlog, type DevReason } from '@/src/shared/devlog.ts';
-import {
-  INSTANCE_PING_EVENT,
-  INSTANCE_READY_EVENT,
-  SEND_EVENT_TYPES,
-  isSendEvent,
-} from './send-events.ts';
+import { SEND_EVENT_TYPES, isSendEvent } from './send-events.ts';
 
 export type PromptTransform = (text: string) => string | Promise<string>;
 
 export interface InterceptorOptions {
   adapter: SiteAdapter;
   transform: PromptTransform;
-  /** Removes every listener when aborted (content script invalidated). */
+  /** Removes every listener when aborted. */
   signal: AbortSignal;
+  /** False once the extension context is gone; checked before every send. */
+  isContextValid: () => boolean;
+  /** Called when a send finds the extension context gone. */
+  onOrphaned: () => void;
   target?: Window;
 }
 
@@ -35,17 +34,28 @@ function reasonOf(error: unknown): DevReason {
   return 'unexpected-error';
 }
 
+function block(event: Event): void {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
 /**
  * Holds every user send, runs `transform` on the prompt, writes the result
  * back into the editor and then sends it through the site's own control.
  *
+ * The event handler itself only runs synchronous checks, snapshots the prompt
+ * and blocks the event; the transform, write and send run in a later task.
+ *
  * Fails closed: if any step throws, nothing is sent and the editor keeps the
- * user's original text.
+ * user's original text. Once a send has gone through, the editor is never
+ * touched again, so text the site keeps queued stays masked.
  */
 export function installInterceptor({
   adapter,
   transform,
   signal,
+  isContextValid,
+  onOrphaned,
   target = window,
 }: InterceptorOptions): void {
   let busy = false;
@@ -54,6 +64,10 @@ export function installInterceptor({
 
   const send = (): void => {
     if (signal.aborted) throw new SendAbort('context-invalidated');
+    if (!isContextValid()) {
+      onOrphaned();
+      throw new SendAbort('context-invalidated');
+    }
     sendingOurselves = true;
     try {
       adapter.triggerSend();
@@ -102,9 +116,15 @@ export function installInterceptor({
     if (sendingOurselves || !isSendEvent(adapter, event)) return;
 
     if (busy) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+      block(event);
       devlog('send.ignored-busy');
+      return;
+    }
+
+    if (!isContextValid()) {
+      block(event);
+      devlog('send.blocked', 'context-invalidated');
+      onOrphaned();
       return;
     }
 
@@ -112,33 +132,24 @@ export function installInterceptor({
     try {
       original = adapter.readPrompt();
     } catch (error) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+      block(event);
       devlog('send.blocked', reasonOf(error), error);
       return;
     }
     // Nothing to protect; let the site handle it as usual.
     if (original.trim() === '') return;
 
-    event.preventDefault();
-    event.stopImmediatePropagation();
+    block(event);
     devlog('send.intercepted');
     busy = true;
-    void process(original).finally(() => {
-      busy = false;
-    });
+    setTimeout(() => {
+      void process(original).finally(() => {
+        busy = false;
+      });
+    }, 0);
   };
 
   for (const type of SEND_EVENT_TYPES) {
     target.addEventListener(type, onSendEvent, { capture: true, signal });
   }
-  const announce = (): void => {
-    target.dispatchEvent(new Event(INSTANCE_READY_EVENT));
-  };
-  target.addEventListener(INSTANCE_PING_EVENT, announce, { signal });
-  signal.addEventListener('abort', () => {
-    devlog('interceptor.removed', 'context-invalidated');
-  });
-  devlog('interceptor.installed');
-  announce();
 }

@@ -1,79 +1,62 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { installInterceptor } from '@/src/content/interceptor.ts';
+import { describe, expect, it } from 'vitest';
 import { installSendGuard } from '@/src/content/send-guard.ts';
-import { flush, pressKey, setUp } from './harness.ts';
+import { pressKey, setUp } from './harness.ts';
+
+const click = (el: HTMLElement): MouseEvent => {
+  const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+  el.dispatchEvent(event);
+  return event;
+};
+
+const submit = (form: HTMLFormElement): Event => {
+  const event = new Event('submit', { bubbles: true, cancelable: true });
+  form.dispatchEvent(event);
+  return event;
+};
 
 describe('installSendGuard', () => {
-  const controllers: AbortController[] = [];
-
-  afterEach(() => {
-    for (const controller of controllers) controller.abort();
-    // Any guard still active stands down when an instance announces itself.
-    window.dispatchEvent(new Event('promptveil:interceptor-ready'));
-  });
-
-  const startInterceptor = (h: ReturnType<typeof setUp>): AbortController => {
-    const controller = new AbortController();
-    controllers.push(controller);
-    installInterceptor({
-      adapter: h.adapter,
-      transform: (text) => text.toUpperCase(),
-      signal: controller.signal,
-    });
-    return controller;
-  };
-
   it('blocks every send path and leaves other keys alone', () => {
     const h = setUp();
     installSendGuard(h.adapter);
     h.editor.textContent = 'hello';
 
-    const enter = pressKey(h.editor, { key: 'Enter' });
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
-    h.button.dispatchEvent(click);
-    const submit = new Event('submit', { bubbles: true, cancelable: true });
-    h.form.dispatchEvent(submit);
-    const newline = pressKey(h.editor, { key: 'Enter', shiftKey: true });
-    const letter = pressKey(h.editor, { key: 'a' });
-
-    expect(enter.defaultPrevented).toBe(true);
-    expect(click.defaultPrevented).toBe(true);
-    expect(submit.defaultPrevented).toBe(true);
-    expect(newline.defaultPrevented).toBe(false);
-    expect(letter.defaultPrevented).toBe(false);
+    expect(pressKey(h.editor, { key: 'Enter' }).defaultPrevented).toBe(true);
+    expect(click(h.button).defaultPrevented).toBe(true);
+    expect(submit(h.form).defaultPrevented).toBe(true);
+    expect(
+      pressKey(h.editor, { key: 'Enter', shiftKey: true }).defaultPrevented,
+    ).toBe(false);
+    expect(pressKey(h.editor, { key: 'a' }).defaultPrevented).toBe(false);
     expect(h.siteSends).toEqual([]);
   });
 
-  it('takes over from an invalidated interceptor', async () => {
+  it('cannot be stood down by events a page script dispatches', () => {
     const h = setUp();
-    const old = startInterceptor(h);
-    old.abort();
     installSendGuard(h.adapter);
-    h.editor.textContent = 'hello';
-    pressKey(h.editor, { key: 'Enter' });
-    await flush();
+    h.editor.textContent = 'dana@example.com';
+
+    for (const type of [
+      'promptveil:instance-started',
+      'promptveil:interceptor-ready',
+      'promptveil:interceptor-ping',
+      'promptveil:instance-alive',
+    ]) {
+      window.dispatchEvent(new Event(type));
+      document.dispatchEvent(new CustomEvent(type, { detail: { ok: true } }));
+    }
+
+    expect(pressKey(h.editor, { key: 'Enter' }).defaultPrevented).toBe(true);
+    expect(click(h.button).defaultPrevented).toBe(true);
+    expect(submit(h.form).defaultPrevented).toBe(true);
     expect(h.siteSends).toEqual([]);
   });
 
-  it('stands down when a newer interceptor is already running', async () => {
-    const h = setUp();
-    const old = startInterceptor(h);
-    startInterceptor(h);
-    old.abort();
-    installSendGuard(h.adapter);
-    h.editor.textContent = 'hello';
-    pressKey(h.editor, { key: 'Enter' });
-    await flush();
-    expect(h.siteSends).toEqual(['HELLO']);
-  });
-
-  it('stands down when a newer interceptor starts later', async () => {
+  it('blocks synthetic sends as well as user ones', () => {
     const h = setUp();
     installSendGuard(h.adapter);
-    startInterceptor(h);
-    h.editor.textContent = 'hello';
-    pressKey(h.editor, { key: 'Enter' });
-    await flush();
-    expect(h.siteSends).toEqual(['HELLO']);
+    h.editor.textContent = 'dana@example.com';
+    // Synthetic events from page scripts are untrusted; they are still sends.
+    h.button.click();
+    expect(h.siteSends).toEqual([]);
   });
 });
