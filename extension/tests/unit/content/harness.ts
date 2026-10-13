@@ -5,6 +5,8 @@ export interface Harness {
   editor: HTMLElement;
   button: HTMLButtonElement;
   form: HTMLFormElement;
+  /** A message area, outside the composer, for restoration tests. */
+  message: HTMLElement;
   /** Sends the site itself would have performed (its own handlers). */
   siteSends: string[];
   /** Calls to adapter.triggerSend. */
@@ -21,13 +23,15 @@ export function setUp(): Harness {
   button.type = 'submit';
   button.append(document.createElement('span'));
   form.append(editor, button);
-  document.body.replaceChildren(form);
+  const message = document.createElement('div');
+  document.body.replaceChildren(message, form);
 
   const harness: Harness = {
     adapter: {} as SiteAdapter,
     editor,
     button,
     form,
+    message,
     siteSends: [],
     triggered: 0,
     failingWrites: 0,
@@ -66,7 +70,8 @@ export function setUp(): Harness {
       button.click();
     },
     getConversationId: () => null,
-    getMessageContainers: () => [],
+    getMessageContainers: () => [message],
+    getMessageContainer: (node) => (message.contains(node) ? message : null),
     isAssistantMessage: () => false,
   };
   return harness;

@@ -21,9 +21,19 @@ export interface SiteAdapter {
   triggerSend(): void;
   /** Conversation ID from the URL; null for a new chat. */
   getConversationId(): string | null;
-  /** User and assistant message elements. */
-  getMessageContainers(): HTMLElement[];
+  /**
+   * User and assistant message elements in document order, outermost match
+   * only. Limited to `within` when given.
+   */
+  getMessageContainers(within?: ParentNode): HTMLElement[];
+  /** The message element containing `node`, or null outside messages. */
+  getMessageContainer(node: Node): HTMLElement | null;
   isAssistantMessage(el: HTMLElement): boolean;
+  /**
+   * Optional site signal that an assistant reply has finished streaming.
+   * Without it, a reply counts as finished after a quiet period.
+   */
+  isReplyComplete?(container: HTMLElement): boolean;
 }
 
 export type AdapterErrorCode =
@@ -31,8 +41,7 @@ export type AdapterErrorCode =
   | 'send-button-missing'
   | 'send-button-disabled'
   | 'send-button-stop'
-  | 'write-mismatch'
-  | 'not-implemented';
+  | 'write-mismatch';
 
 /** Thrown by adapters; carries a fixed code and never any prompt text. */
 export class AdapterError extends Error {

@@ -13,9 +13,11 @@ export default defineContentScript({
     const adapter = createChatGptAdapter();
     if (!adapter.matches(new URL(location.href))) return;
 
+    const masker = createSpikeMasker();
     startInstance({
       adapter,
-      transform: createSpikeMasker(),
+      transform: masker.transform,
+      source: masker.source,
       isContextValid: isExtensionContextValid,
       signal: ctx.signal,
     });

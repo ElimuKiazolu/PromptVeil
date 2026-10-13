@@ -17,13 +17,12 @@ describe('startInstance', () => {
   let h: Harness;
   const started: TestInstance[] = [];
 
-  const start = (
-    transform: PromptTransform = createSpikeMasker(),
-  ): TestInstance => {
+  const start = (transform?: PromptTransform): TestInstance => {
+    const masker = createSpikeMasker();
     let valid = true;
     const instance: TestInstance = {
       frameworkAbort: new AbortController(),
-      transform: vi.fn(transform),
+      transform: vi.fn(transform ?? masker.transform),
       setContextValid: (next) => {
         valid = next;
       },
@@ -31,6 +30,7 @@ describe('startInstance', () => {
     startInstance({
       adapter: h.adapter,
       transform: instance.transform,
+      source: masker.source,
       isContextValid: () => valid,
       signal: instance.frameworkAbort.signal,
       heartbeatMs: HEARTBEAT_MS,
@@ -96,7 +96,7 @@ describe('startInstance', () => {
   it('does not send when the context is lost mid-send', async () => {
     const instance: TestInstance = start((text) => {
       instance.setContextValid(false);
-      return createSpikeMasker()(text);
+      return createSpikeMasker().transform(text);
     });
     h.editor.textContent = 'Test dana@example.com';
     pressKey(h.editor, { key: 'Enter' });
@@ -163,5 +163,34 @@ describe('startInstance', () => {
     );
     await flush();
     expect(h.siteSends).toEqual([]);
+  });
+
+  it('restores real values while alive and stops once orphaned', async () => {
+    const instance = start();
+    h.editor.textContent = 'Test dana@example.com';
+    pressKey(h.editor, { key: 'Enter' });
+    await flush();
+
+    // Fake intervals also drive jsdom's animation frames, so advance them.
+    const nextFrame = async (): Promise<void> => {
+      await Promise.resolve();
+      const frame = new Promise<void>((done) => {
+        requestAnimationFrame(() => {
+          done();
+        });
+      });
+      vi.advanceTimersByTime(50);
+      await frame;
+    };
+
+    h.message.textContent = 'You wrote standin.1@example.net';
+    await nextFrame();
+    expect(h.message.textContent).toBe('You wrote dana@example.com');
+
+    instance.setContextValid(false);
+    vi.advanceTimersByTime(HEARTBEAT_MS);
+    h.message.textContent = 'Again standin.1@example.net';
+    await nextFrame();
+    expect(h.message.textContent).toBe('Again standin.1@example.net');
   });
 });

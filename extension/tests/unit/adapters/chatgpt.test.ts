@@ -234,13 +234,102 @@ describe('ChatGPT adapter on the composer snapshot', () => {
     expect(performance.now() - startedAt).toBeLessThan(1000);
     expect(text.length).toBeGreaterThan(100_000);
   });
+});
 
-  it('marks message methods as not implemented yet', () => {
+describe('ChatGPT messages', () => {
+  const conversationHtml = readFileSync(
+    resolve('tests/fixtures/sites/chatgpt/conversation.html'),
+    'utf8',
+  );
+
+  beforeEach(() => {
+    loadComposer(conversationHtml);
+  });
+
+  it('finds the user bubble and the assistant reply in order', () => {
     const adapter = createChatGptAdapter();
-    expect(() => adapter.getMessageContainers()).toThrow(AdapterError);
-    expect(() => adapter.isAssistantMessage(document.body)).toThrow(
-      AdapterError,
+    const containers = adapter.getMessageContainers();
+    expect(containers).toHaveLength(2);
+    const [user, assistant] = containers;
+    expect(user?.dataset.userMessageBubble).toBe('true');
+    expect(assistant?.dataset.markdownTextStyle).toBe('assistant-message');
+    expect(user && adapter.isAssistantMessage(user)).toBe(false);
+    expect(assistant && adapter.isAssistantMessage(assistant)).toBe(true);
+  });
+
+  it('maps a streamed word to its outermost message container', () => {
+    const adapter = createChatGptAdapter();
+    const word = document.querySelector('[data-d-stream-word]');
+    const text = word?.firstChild;
+    if (!text) throw new Error('no word span');
+    const container = adapter.getMessageContainer(text);
+    expect(container?.dataset.markdownTextStyle).toBe('assistant-message');
+  });
+
+  it('returns null outside messages', () => {
+    const adapter = createChatGptAdapter();
+    expect(adapter.getMessageContainer(document.body)).toBeNull();
+    const heading = document.querySelector('h4');
+    expect(heading && adapter.getMessageContainer(heading)).toBeNull();
+  });
+
+  it('limits containers to a subtree', () => {
+    const adapter = createChatGptAdapter();
+    const turn = document.querySelector(
+      '[data-chatgpt-search-unit-key$=":user"]',
     );
+    if (!turn) throw new Error('no user turn');
+    const inside = adapter.getMessageContainers(turn);
+    expect(inside).toHaveLength(1);
+    expect(inside[0]?.dataset.userMessageBubble).toBe('true');
+  });
+
+  it('does not treat the composer as a message', () => {
+    loadComposer();
+    const adapter = createChatGptAdapter();
+    const editor = adapter.getEditor();
+    if (!editor) throw new Error('no editor');
+    expect(adapter.getMessageContainer(editor)).toBeNull();
+    expect(adapter.getMessageContainers()).toEqual([]);
+  });
+
+  it('finds the reply in the single reply snapshots', () => {
+    for (const file of ['reply.html', 'reply-word-spans.html']) {
+      loadComposer(
+        readFileSync(resolve(`tests/fixtures/sites/chatgpt/${file}`), 'utf8'),
+      );
+      const adapter = createChatGptAdapter();
+      const containers = adapter.getMessageContainers();
+      expect(containers).toHaveLength(1);
+      expect(containers[0] && adapter.isAssistantMessage(containers[0])).toBe(
+        true,
+      );
+    }
+  });
+
+  it('finds the user bubble snapshot', () => {
+    loadComposer(
+      readFileSync(
+        resolve('tests/fixtures/sites/chatgpt/user-message.html'),
+        'utf8',
+      ),
+    );
+    const adapter = createChatGptAdapter();
+    const [user] = adapter.getMessageContainers();
+    expect(user?.textContent).toContain('standin.1@example.net');
+    expect(user && adapter.isAssistantMessage(user)).toBe(false);
+  });
+
+  it('falls back to the earlier author-role markers', () => {
+    const user = document.createElement('div');
+    user.dataset.messageAuthorRole = 'user';
+    const assistant = document.createElement('div');
+    assistant.dataset.messageAuthorRole = 'assistant';
+    document.body.replaceChildren(user, assistant);
+    const adapter = createChatGptAdapter();
+    expect(adapter.getMessageContainers()).toEqual([user, assistant]);
+    expect(adapter.isAssistantMessage(assistant)).toBe(true);
+    expect(adapter.isAssistantMessage(user)).toBe(false);
   });
 });
 

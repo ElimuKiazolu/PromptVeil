@@ -28,9 +28,7 @@ class SendAbort extends Error {
 
 function reasonOf(error: unknown): DevReason {
   if (error instanceof SendAbort) return error.reason;
-  if (error instanceof AdapterError && error.code !== 'not-implemented') {
-    return error.code;
-  }
+  if (error instanceof AdapterError) return error.code;
   return 'unexpected-error';
 }
 
@@ -82,7 +80,7 @@ export function installInterceptor({
         await adapter.writePrompt(original);
       }
     } catch (error) {
-      devlog('send.blocked', 'restore-failed', error);
+      devlog('send.blocked', { reason: 'restore-failed', error });
     }
   };
 
@@ -107,7 +105,7 @@ export function installInterceptor({
       send();
       devlog(edited ? 'send.masked' : 'send.passthrough');
     } catch (error) {
-      devlog('send.blocked', reasonOf(error), error);
+      devlog('send.blocked', { reason: reasonOf(error), error });
       if (edited) await restore(original);
     }
   };
@@ -123,7 +121,7 @@ export function installInterceptor({
 
     if (!isContextValid()) {
       block(event);
-      devlog('send.blocked', 'context-invalidated');
+      devlog('send.blocked', { reason: 'context-invalidated' });
       onOrphaned();
       return;
     }
@@ -133,7 +131,7 @@ export function installInterceptor({
       original = adapter.readPrompt();
     } catch (error) {
       block(event);
-      devlog('send.blocked', reasonOf(error), error);
+      devlog('send.blocked', { reason: reasonOf(error), error });
       return;
     }
     // Nothing to protect; let the site handle it as usual.

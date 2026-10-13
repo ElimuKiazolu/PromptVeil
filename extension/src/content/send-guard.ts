@@ -20,10 +20,10 @@ export function installSendGuard(
     if (!isSendEvent(adapter, event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    devlog('guard.blocked', 'context-invalidated');
+    devlog('guard.blocked', { reason: 'context-invalidated' });
   };
   for (const type of SEND_EVENT_TYPES) {
     target.addEventListener(type, block, { capture: true });
   }
-  devlog('guard.installed', 'context-invalidated');
+  devlog('guard.installed', { reason: 'context-invalidated' });
 }

@@ -23,7 +23,25 @@ const SELECTORS = {
   // streams and the editor has text, the composer keeps its Send button
   // (clicking it queues the message); this hook is refused regardless.
   stopButton: ['[data-testid="stop-button"]'],
+  userMessage: [
+    // The user's message bubble.
+    '[data-user-message-bubble="true"]',
+    // Earlier layouts marked each message with its author role.
+    '[data-message-author-role="user"]',
+  ],
+  assistantMessage: [
+    // The rendered markdown of an assistant reply.
+    '[data-markdown-text-style="assistant-message"]',
+    // The reply renderer root inside it.
+    '[data-dil-message-id]',
+    // Earlier layouts.
+    '[data-message-author-role="assistant"]',
+  ],
 } as const;
+
+const USER_MESSAGE = SELECTORS.userMessage.join(', ');
+const ASSISTANT_MESSAGE = SELECTORS.assistantMessage.join(', ');
+const ANY_MESSAGE = `${USER_MESSAGE}, ${ASSISTANT_MESSAGE}`;
 
 const HOSTNAME = 'chatgpt.com';
 
@@ -61,6 +79,17 @@ function queryFirst(
   for (const selector of selectors) {
     const found = doc.querySelector<HTMLElement>(selector);
     if (found) return found;
+  }
+  return null;
+}
+
+/** The outermost message element containing `el` (or `el` itself). */
+function outermostMessage(el: Element): HTMLElement | null {
+  let found = el.closest<HTMLElement>(ANY_MESSAGE);
+  while (found) {
+    const outer = found.parentElement?.closest<HTMLElement>(ANY_MESSAGE);
+    if (!outer) return found;
+    found = outer;
   }
   return null;
 }
@@ -177,12 +206,21 @@ export function createChatGptAdapter(doc: Document = document): SiteAdapter {
 
     getConversationId: () => conversationIdFromUrl(new URL(doc.location.href)),
 
-    getMessageContainers() {
-      throw new AdapterError('not-implemented');
+    getMessageContainers(within = doc) {
+      const matches = Array.from(
+        within.querySelectorAll<HTMLElement>(ANY_MESSAGE),
+      );
+      // Keep only outermost matches; nested hooks belong to the same message.
+      return matches.filter((el) => !el.parentElement?.closest(ANY_MESSAGE));
     },
 
-    isAssistantMessage() {
-      throw new AdapterError('not-implemented');
+    getMessageContainer(node) {
+      const el = node instanceof Element ? node : node.parentElement;
+      return el ? outermostMessage(el) : null;
+    },
+
+    isAssistantMessage(el) {
+      return el.closest(ASSISTANT_MESSAGE) !== null;
     },
   };
 }

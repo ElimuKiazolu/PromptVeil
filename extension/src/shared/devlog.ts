@@ -17,7 +17,11 @@ export type DevEvent =
   | 'send.blocked'
   | 'send.ignored-busy'
   | 'guard.installed'
-  | 'guard.blocked';
+  | 'guard.blocked'
+  | 'restore.started'
+  | 'restore.stopped'
+  | 'restore.applied'
+  | 'restore.leak-check';
 
 export type DevReason =
   | 'editor-missing'
@@ -37,15 +41,21 @@ const PREFIX = '[PromptVeil]';
 /** Distinguishes content-script instances (one per page load or injection). */
 const INSTANCE_TAG = Math.random().toString(36).slice(2, 6);
 
-export function devlog(
-  event: DevEvent,
-  reason?: DevReason,
-  error?: unknown,
-): void {
+export interface DevDetails {
+  reason?: DevReason;
+  /** Only the error's class name is printed. */
+  error?: unknown;
+  /** A count, e.g. of values restored or stand-ins left visible. */
+  count?: number;
+}
+
+export function devlog(event: DevEvent, details: DevDetails = {}): void {
   if (!import.meta.env.DEV) return;
   const parts: string[] = [PREFIX, 'dev', INSTANCE_TAG, event];
-  if (reason !== undefined) parts.push(reason);
-  if (error !== undefined) parts.push(errorName(error));
+  if (details.reason !== undefined) parts.push(details.reason);
+  if (details.error !== undefined) parts.push(errorName(details.error));
+  if (details.count !== undefined)
+    parts.push(`count=${details.count.toString()}`);
   // Info level is visible with DevTools' default console levels.
   console.info(parts.join(' '));
 }

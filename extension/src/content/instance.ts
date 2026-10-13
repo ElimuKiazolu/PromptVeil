@@ -1,12 +1,16 @@
 import type { SiteAdapter } from '@/src/adapters/types.ts';
 import { devlog } from '@/src/shared/devlog.ts';
 import { installInterceptor, type PromptTransform } from './interceptor.ts';
+import type { StandInSource } from '@/src/core/restore/index.ts';
+import { startRestorer } from './restorer.ts';
 import { installSendGuard } from './send-guard.ts';
 import { INSTANCE_STARTED_EVENT } from './send-events.ts';
 
 export interface InstanceOptions {
   adapter: SiteAdapter;
   transform: PromptTransform;
+  /** Stand-in mappings used to show real values in the conversation. */
+  source: StandInSource;
   /** Reads state private to this script's world (the extension runtime). */
   isContextValid: () => boolean;
   /** Aborted by the content-script framework when it invalidates us. */
@@ -18,8 +22,9 @@ export interface InstanceOptions {
 const DEFAULT_HEARTBEAT_MS = 2000;
 
 /**
- * Runs one content-script instance: the send interceptor while the extension
- * context is alive, and the block-only guard once it is not.
+ * Runs one content-script instance: the send interceptor and the restorer
+ * while the extension context is alive, and the block-only guard once it is
+ * not (an orphan stops restoring too).
  *
  * Old and new instances do not share a world after an extension reload or
  * update, so the only way out of the guard is a page reload. Signals the page
@@ -28,6 +33,7 @@ const DEFAULT_HEARTBEAT_MS = 2000;
 export function startInstance({
   adapter,
   transform,
+  source,
   isContextValid,
   signal,
   target = window,
@@ -59,6 +65,13 @@ export function startInstance({
       stop('orphaned');
     },
     target,
+  });
+
+  startRestorer({
+    adapter,
+    source,
+    signal: controller.signal,
+    root: target.document.documentElement,
   });
 
   signal.addEventListener(

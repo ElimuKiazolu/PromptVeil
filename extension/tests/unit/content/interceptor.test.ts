@@ -317,7 +317,7 @@ describe('installInterceptor', () => {
   });
 
   it('leaves a sent prompt masked when the site keeps it in the editor', async () => {
-    install(createSpikeMasker());
+    install(createSpikeMasker().transform);
     h.editor.textContent = 'mail dana@example.com';
     pressKey(h.editor, { key: 'Enter' });
     await flush();
@@ -337,7 +337,7 @@ describe('installInterceptor', () => {
   });
 
   it('masks a send triggered by a synthetic page event', async () => {
-    install(createSpikeMasker());
+    install(createSpikeMasker().transform);
     h.editor.textContent = 'mail dana@example.com';
     h.button.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
