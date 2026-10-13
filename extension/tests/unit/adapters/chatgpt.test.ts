@@ -7,15 +7,20 @@ import {
 } from '@/src/adapters/chatgpt.ts';
 import { AdapterError } from '@/src/adapters/types.ts';
 
+const streamingHtml = readFileSync(
+  resolve('tests/fixtures/sites/chatgpt/composer-streaming.html'),
+  'utf8',
+);
+
 const composerHtml = readFileSync(
   // Vitest runs from the extension root.
   resolve('tests/fixtures/sites/chatgpt/composer.html'),
   'utf8',
 );
 
-/** Loads the sanitised composer snapshot without innerHTML. */
-function loadComposer(): void {
-  const parsed = new DOMParser().parseFromString(composerHtml, 'text/html');
+/** Loads a sanitised composer snapshot without innerHTML. */
+function loadComposer(html = composerHtml): void {
+  const parsed = new DOMParser().parseFromString(html, 'text/html');
   document.body.replaceChildren(
     ...Array.from(parsed.body.childNodes, (node) =>
       document.importNode(node, true),
@@ -62,7 +67,9 @@ function stubExecCommand(impl: ExecCommand) {
 }
 
 describe('ChatGPT adapter on the composer snapshot', () => {
-  beforeEach(loadComposer);
+  beforeEach(() => {
+    loadComposer();
+  });
 
   afterEach(() => {
     Reflect.deleteProperty(document, 'execCommand');
@@ -200,12 +207,69 @@ describe('ChatGPT adapter on the composer snapshot', () => {
     }).toThrow(AdapterError);
   });
 
+  it('refuses a send button in its stop state', () => {
+    const adapter = createChatGptAdapter();
+    const button = adapter.getSendButton();
+    if (!button) throw new Error('no button');
+    button.dataset.testid = 'stop-button';
+    const onClick = vi.fn();
+    button.addEventListener('click', onClick);
+    expect(() => {
+      adapter.triggerSend();
+    }).toThrow(expect.objectContaining({ code: 'send-button-stop' }));
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('reads a long multi-paragraph prompt quickly', () => {
+    const lines = Array.from(
+      { length: 2000 },
+      (_, i) => `Paragraph ${i.toString()} ${'x'.repeat(45)}`,
+    );
+    setParagraphs(editorOf(), lines);
+    const adapter = createChatGptAdapter();
+    const startedAt = performance.now();
+    const text = adapter.readPrompt();
+    // jsdom is far slower than Chrome; this budget catches super-linear
+    // behaviour, which would take seconds at this size.
+    expect(performance.now() - startedAt).toBeLessThan(1000);
+    expect(text.length).toBeGreaterThan(100_000);
+  });
+
   it('marks message methods as not implemented yet', () => {
     const adapter = createChatGptAdapter();
     expect(() => adapter.getMessageContainers()).toThrow(AdapterError);
     expect(() => adapter.isAssistantMessage(document.body)).toThrow(
       AdapterError,
     );
+  });
+});
+
+describe('ChatGPT adapter while a reply is streaming', () => {
+  beforeEach(() => {
+    loadComposer(streamingHtml);
+  });
+
+  it('finds the editor and its text', () => {
+    expect(createChatGptAdapter().readPrompt()).toBe('Draft prompt');
+  });
+
+  it('targets the Send button, which queues the message', () => {
+    const adapter = createChatGptAdapter();
+    const button = adapter.getSendButton();
+    expect(button?.getAttribute('type')).toBe('submit');
+    expect(button?.getAttribute('aria-label')).toBe('Send');
+    const onClick = vi.fn((event: Event) => {
+      event.preventDefault();
+    });
+    button?.addEventListener('click', onClick);
+    adapter.triggerSend();
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('has no stop-state button inside the composer form', () => {
+    const form = document.querySelector('form[data-chatgpt-composer]');
+    expect(form?.querySelectorAll('button[type="submit"]')).toHaveLength(1);
+    expect(form?.querySelector('[data-testid="stop-button"]')).toBeNull();
   });
 });
 

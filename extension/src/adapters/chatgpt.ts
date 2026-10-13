@@ -19,6 +19,10 @@ const SELECTORS = {
     'button[data-testid="send-button"]',
     '#composer-submit-button',
   ],
+  // The composer button in its "stop generating" state. While a reply
+  // streams and the editor has text, the composer keeps its Send button
+  // (clicking it queues the message); this hook is refused regardless.
+  stopButton: ['[data-testid="stop-button"]'],
 } as const;
 
 const HOSTNAME = 'chatgpt.com';
@@ -165,6 +169,9 @@ export function createChatGptAdapter(doc: Document = document): SiteAdapter {
         (button instanceof HTMLButtonElement && button.disabled) ||
         button.getAttribute('aria-disabled') === 'true';
       if (disabled) throw new AdapterError('send-button-disabled');
+      if (SELECTORS.stopButton.some((selector) => button.matches(selector))) {
+        throw new AdapterError('send-button-stop');
+      }
       button.click();
     },
 

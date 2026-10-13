@@ -30,6 +30,7 @@ export type AdapterErrorCode =
   | 'editor-missing'
   | 'send-button-missing'
   | 'send-button-disabled'
+  | 'send-button-stop'
   | 'write-mismatch'
   | 'not-implemented';
 
