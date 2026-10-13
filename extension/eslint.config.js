@@ -68,6 +68,28 @@ export default tseslint.config(
     },
   },
   {
+    // Content scripts inject no CSS or fonts into host pages until the
+    // in-page UI phase, which loads them inside its Shadow DOM.
+    files: [
+      'entrypoints/*.content.ts',
+      'src/content/**/*.ts',
+      'src/adapters/**/*.ts',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['*.css', '@fontsource/*'],
+              message: 'Content scripts must not inject CSS or fonts.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // The dev logger is the only place in src/ that may write to the console.
     files: ['src/shared/devlog.ts'],
     rules: { 'no-console': 'off' },
