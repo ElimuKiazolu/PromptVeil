@@ -96,4 +96,22 @@ describe('createSpikeMasker', () => {
     transform('dana@example.com again');
     expect(source.version).toBe(2);
   });
+
+  it('tags stand-ins with the page-load tag so numbers never collide', () => {
+    const { transform, source } = createSpikeMasker({ sessionTag: 'k3f9' });
+    expect(transform('mail dana@example.com')).toBe(
+      'mail standin.1.k3f9@example.net',
+    );
+    expect(source.mappings()[0]?.standIn).toBe('standin.1.k3f9@example.net');
+    // A stand-in from another page load is recognised and left alone.
+    expect(transform('old standin.1.zz01@example.net')).toBe(
+      'old standin.1.zz01@example.net',
+    );
+  });
+
+  it('rejects a malformed session tag', () => {
+    expect(() => createSpikeMasker({ sessionTag: 'Bad Tag' })).toThrow(
+      RangeError,
+    );
+  });
 });
