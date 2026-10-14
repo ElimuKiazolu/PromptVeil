@@ -1,13 +1,12 @@
 export type SiteId = 'chatgpt' | 'gemini' | 'claude';
 
-/**
- * Everything site-specific lives behind this interface, so a site change is a
- * one-file fix in the matching adapter.
- */
-export interface SiteAdapter {
-  readonly id: SiteId;
-  matches(url: URL): boolean;
-  /** The prompt editor (textarea or contenteditable), or null if not rendered. */
+/** 'main' is the page's prompt composer; 'edit' edits an earlier message. */
+export type ComposerKind = 'main' | 'edit';
+
+/** One place where the user writes and sends a prompt. */
+export interface Composer {
+  readonly kind: ComposerKind;
+  /** The editor (textarea or contenteditable), or null if it is gone. */
   getEditor(): HTMLElement | null;
   /** The prompt exactly as the site will send it. */
   readPrompt(): string;
@@ -19,6 +18,22 @@ export interface SiteAdapter {
   getSendButton(): HTMLElement | null;
   /** Sends the current prompt. Throws if the site is not ready to send. */
   triggerSend(): void;
+}
+
+/**
+ * Everything site-specific lives behind this interface, so a site change is a
+ * one-file fix in the matching adapter.
+ */
+export interface SiteAdapter {
+  readonly id: SiteId;
+  matches(url: URL): boolean;
+  /** The page's main composer, or null if it is not rendered. */
+  getMainComposer(): Composer | null;
+  /**
+   * The composer an event target belongs to (its editor, send button or
+   * form), or null when the target is not part of any composer.
+   */
+  composerFor(target: EventTarget | null): Composer | null;
   /** Conversation ID from the URL; null for a new chat. */
   getConversationId(): string | null;
   /**
@@ -34,6 +49,20 @@ export interface SiteAdapter {
    * Without it, a reply counts as finished after a quiet period.
    */
   isReplyComplete?(container: HTMLElement): boolean;
+}
+
+/**
+ * How the request safety net recognises a site's message requests. Pure
+ * functions: the MAIN-world net uses them without any page DOM.
+ */
+export interface SiteNetRules {
+  /** True for the request(s) that send prompt text to the chatbot. */
+  isMessageEndpoint(url: URL, method: string): boolean;
+  /**
+   * The user's message text in a parsed message-request body, or null when
+   * the body does not have the expected shape (then all text is checked).
+   */
+  messageTexts(body: unknown): string[] | null;
 }
 
 export type AdapterErrorCode =

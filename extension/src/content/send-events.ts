@@ -1,4 +1,4 @@
-import type { SiteAdapter } from '@/src/adapters/types.ts';
+import type { Composer, SiteAdapter } from '@/src/adapters/types.ts';
 
 /**
  * Enter without Shift sends; Ctrl/Cmd+Enter is treated as a send too.
@@ -16,29 +16,35 @@ function isInside(container: HTMLElement | null, target: EventTarget | null) {
 }
 
 /**
- * True when the event would make the site send the current prompt. Cheap
- * checks come first, so ordinary typing returns after a key comparison.
+ * The composer the event would make the site send from, or null when the
+ * event is not a send. Cheap checks come first, so ordinary typing returns
+ * after a key comparison.
  */
-export function isSendEvent(adapter: SiteAdapter, event: Event): boolean {
+export function sendEventComposer(
+  adapter: SiteAdapter,
+  event: Event,
+): Composer | null {
   if (event.type === 'keydown') {
-    return (
-      event instanceof KeyboardEvent &&
-      isSendKey(event) &&
-      isInside(adapter.getEditor(), event.target)
-    );
+    if (!(event instanceof KeyboardEvent) || !isSendKey(event)) return null;
+    const composer = adapter.composerFor(event.target);
+    return composer && isInside(composer.getEditor(), event.target)
+      ? composer
+      : null;
   }
   if (event.type === 'click') {
-    return isInside(adapter.getSendButton(), event.target);
+    const composer = adapter.composerFor(event.target);
+    return composer && isInside(composer.getSendButton(), event.target)
+      ? composer
+      : null;
   }
   if (event.type === 'submit') {
-    const editor = adapter.getEditor();
-    return (
-      event.target instanceof HTMLFormElement &&
-      editor !== null &&
-      event.target.contains(editor)
-    );
+    if (!(event.target instanceof HTMLFormElement)) return null;
+    const composer = adapter.composerFor(event.target);
+    return composer && isInside(event.target, composer.getEditor())
+      ? composer
+      : null;
   }
-  return false;
+  return null;
 }
 
 export const SEND_EVENT_TYPES = ['keydown', 'click', 'submit'] as const;

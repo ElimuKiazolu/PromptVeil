@@ -13,12 +13,14 @@ describe('installInterceptor', () => {
   let h: Harness;
   let controller: AbortController;
   let contextValid: boolean;
+  let netReady: boolean;
   let orphanedCalls: number;
 
   beforeEach(() => {
     h = setUp();
     controller = new AbortController();
     contextValid = true;
+    netReady = true;
     orphanedCalls = 0;
   });
 
@@ -35,6 +37,7 @@ describe('installInterceptor', () => {
       onOrphaned: () => {
         orphanedCalls += 1;
       },
+      isNetReady: () => netReady,
     });
   };
 
@@ -157,7 +160,7 @@ describe('installInterceptor', () => {
 
   it('does not send when triggerSend throws, and restores the original', async () => {
     install();
-    h.adapter.triggerSend = () => {
+    h.composer.triggerSend = () => {
       throw new AdapterError('send-button-disabled');
     };
     h.editor.textContent = 'hello';
@@ -182,7 +185,7 @@ describe('installInterceptor', () => {
 
   it('sends without rewriting when the transform changes nothing', async () => {
     install((text) => text);
-    const write = vi.spyOn(h.adapter, 'writePrompt');
+    const write = vi.spyOn(h.composer, 'writePrompt');
     h.editor.textContent = 'nothing to mask';
     pressKey(h.editor, { key: 'Enter' });
     await flush();
@@ -235,7 +238,7 @@ describe('installInterceptor', () => {
 
   it('blocks the send when the prompt cannot be read', async () => {
     install();
-    h.adapter.readPrompt = () => {
+    h.composer.readPrompt = () => {
       throw new AdapterError('editor-missing');
     };
     const event = new MouseEvent('click', { bubbles: true, cancelable: true });
@@ -326,7 +329,7 @@ describe('installInterceptor', () => {
     await flush();
     expect(h.editor.textContent).toBe('mail standin.1@example.net');
 
-    const write = vi.spyOn(h.adapter, 'writePrompt');
+    const write = vi.spyOn(h.composer, 'writePrompt');
     pressKey(h.editor, { key: 'Enter' });
     await flush();
     expect(write).not.toHaveBeenCalled();
@@ -344,5 +347,100 @@ describe('installInterceptor', () => {
     );
     await flush();
     expect(h.siteSends).toEqual(['mail standin.1@example.net']);
+  });
+
+  it('blocks every send while the request safety net is not confirmed', async () => {
+    const transform = vi.fn(upperCase);
+    install(transform);
+    netReady = false;
+    h.editor.textContent = 'hello';
+    const enter = pressKey(h.editor, { key: 'Enter' });
+    h.edit.editor.textContent = 'edited';
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    h.edit.button.dispatchEvent(click);
+    await flush();
+    expect(enter.defaultPrevented).toBe(true);
+    expect(click.defaultPrevented).toBe(true);
+    expect(transform).not.toHaveBeenCalled();
+    expect(h.siteSends).toEqual([]);
+    expect(h.editSends).toEqual([]);
+  });
+
+  describe('edit box', () => {
+    it('masks a send from the edit box and leaves the main composer alone', async () => {
+      install(createSpikeMasker().transform);
+      h.editor.textContent = 'draft in main dana@example.com';
+      h.edit.editor.textContent = 'Edited: write to ops@example.org';
+      pressKey(h.edit.editor, { key: 'Enter' });
+      await flush();
+      expect(h.editSends).toEqual(['Edited: write to standin.1@example.net']);
+      expect(h.siteSends).toEqual([]);
+      expect(h.editor.textContent).toBe('draft in main dana@example.com');
+    });
+
+    it('sends from the box whose button was clicked', async () => {
+      install(upperCase);
+      h.editor.textContent = 'main';
+      h.edit.editor.textContent = 'edit';
+      h.edit.button.click();
+      await flush();
+      expect(h.editSends).toEqual(['EDIT']);
+      expect(h.siteSends).toEqual([]);
+      h.button.click();
+      await flush();
+      expect(h.siteSends).toEqual(['MAIN']);
+      expect(h.editSends).toEqual(['EDIT']);
+    });
+
+    it('intercepts a submit of the edit form', async () => {
+      install(upperCase);
+      h.edit.editor.textContent = 'edit';
+      const event = new Event('submit', { bubbles: true, cancelable: true });
+      h.edit.form.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+      await flush();
+      expect(h.editSends).toEqual(['EDIT']);
+    });
+
+    it('leaves known stand-ins in the edit box alone', async () => {
+      const masker = createSpikeMasker();
+      install(masker.transform);
+      h.editor.textContent = 'first dana@example.com';
+      pressKey(h.editor, { key: 'Enter' });
+      await flush();
+
+      // The edit box opens with the stand-in ChatGPT stored.
+      h.edit.editor.textContent = 'first standin.1@example.net, more';
+      const write = vi.spyOn(h.edit.composer, 'writePrompt');
+      pressKey(h.edit.editor, { key: 'Enter' });
+      await flush();
+      expect(write).not.toHaveBeenCalled();
+      expect(h.editSends).toEqual(['first standin.1@example.net, more']);
+    });
+
+    it('gives a value masked earlier the same stand-in in the edit box', async () => {
+      install(createSpikeMasker().transform);
+      h.editor.textContent = 'first dana@example.com';
+      pressKey(h.editor, { key: 'Enter' });
+      await flush();
+
+      h.edit.editor.textContent = 'again dana@example.com and new@example.org';
+      pressKey(h.edit.editor, { key: 'Enter' });
+      await flush();
+      expect(h.editSends).toEqual([
+        'again standin.1@example.net and standin.2@example.net',
+      ]);
+    });
+
+    it('leaves stand-ins from an earlier page load alone', async () => {
+      install(createSpikeMasker().transform);
+      h.edit.editor.textContent =
+        'old standin.7@example.net and dana@example.com';
+      pressKey(h.edit.editor, { key: 'Enter' });
+      await flush();
+      expect(h.editSends).toEqual([
+        'old standin.7@example.net and standin.1@example.net',
+      ]);
+    });
   });
 });

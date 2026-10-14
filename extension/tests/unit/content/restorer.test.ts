@@ -249,7 +249,7 @@ describe('startRestorer', () => {
 
   it('never touches the composer or editable areas', async () => {
     load(`${fixture('composer.html')}${fixture('conversation.html')}`);
-    const editor = adapter.getEditor();
+    const editor = adapter.getMainComposer()?.getEditor();
     const paragraph = editor?.querySelector('p');
     if (!paragraph) throw new Error('no editor paragraph');
     paragraph.textContent = 'standin.1@example.net';
@@ -329,7 +329,7 @@ describe('startRestorer', () => {
     expect(p.textContent).toBe('standin.1@example.net later');
   });
 
-  it('catches up on a 200-message conversation quickly', async () => {
+  it('catches up on a 200-message conversation with linear work', async () => {
     const main = document.createElement('main');
     const content = assistantContent().cloneNode(true);
     const user = document
@@ -342,11 +342,33 @@ describe('startRestorer', () => {
     document.body.replaceChildren(main);
     expect(adapter.getMessageContainers()).toHaveLength(200);
 
+    // Count the work instead of timing it, so the check does not depend on
+    // machine load: catch-up must look at each message about once.
+    let lookups = 0;
     const startedAt = performance.now();
-    start(mutableSource([DANA, OPS]).source);
+    start(mutableSource([DANA, OPS]).source, {
+      getMessageContainer: (node) => {
+        lookups += 1;
+        return adapter.getMessageContainer(node);
+      },
+    });
     await settle();
-    // jsdom is far slower than Chrome; this catches super-linear behaviour.
-    expect(performance.now() - startedAt).toBeLessThan(3000);
     expect(main.textContent).not.toContain('standin.');
+    expect(lookups).toBeLessThanOrEqual(400);
+    // A gross backstop only; jsdom under load is far slower than Chrome.
+    expect(performance.now() - startedAt).toBeLessThan(15_000);
+  });
+
+  it('leaves the edit-message box alone', async () => {
+    load(`${fixture('conversation.html')}${fixture('edit-box.html')}`);
+    const editor = document.querySelector('form [role="textbox"]');
+    start(mutableSource([DANA]).source);
+    await settle();
+    editor?.append(' more');
+    await settle();
+    expect(editor?.textContent).toBe(
+      'Please reply to standin.1@example.net about the plan more',
+    );
+    expect(assistantContent().textContent).toContain('dana@example.com');
   });
 });

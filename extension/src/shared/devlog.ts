@@ -21,7 +21,13 @@ export type DevEvent =
   | 'restore.started'
   | 'restore.stopped'
   | 'restore.applied'
-  | 'restore.leak-check';
+  | 'restore.leak-check'
+  | 'net.ready'
+  | 'net.missing'
+  | 'net.blocked'
+  | 'net.skipped-binary'
+  | 'net.checked'
+  | 'net.failed';
 
 export type DevReason =
   | 'editor-missing'
@@ -34,6 +40,7 @@ export type DevReason =
   | 'transform-failed'
   | 'send-failed'
   | 'context-invalidated'
+  | 'net-missing'
   | 'unexpected-error';
 
 const PREFIX = '[PromptVeil]';
@@ -47,6 +54,10 @@ export interface DevDetails {
   error?: unknown;
   /** A count, e.g. of values restored or stand-ins left visible. */
   count?: number;
+  /** Request safety net: which check blocked, and what kind of request. */
+  tier?: 1 | 2;
+  category?: 'message' | 'other';
+  transport?: 'fetch' | 'xhr' | 'websocket' | 'beacon';
 }
 
 export function devlog(event: DevEvent, details: DevDetails = {}): void {
@@ -56,6 +67,13 @@ export function devlog(event: DevEvent, details: DevDetails = {}): void {
   if (details.error !== undefined) parts.push(errorName(details.error));
   if (details.count !== undefined)
     parts.push(`count=${details.count.toString()}`);
+  if (details.tier !== undefined) parts.push(`tier=${details.tier.toString()}`);
+  if (details.category !== undefined) {
+    parts.push(`category=${details.category}`);
+  }
+  if (details.transport !== undefined) {
+    parts.push(`transport=${details.transport}`);
+  }
   // Info level is visible with DevTools' default console levels.
   console.info(parts.join(' '));
 }

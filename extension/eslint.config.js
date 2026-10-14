@@ -68,6 +68,31 @@ export default tseslint.config(
     },
   },
   {
+    // The MAIN-world request net runs in the page's own world: no extension
+    // APIs exist there, and it must not depend on the WXT runtime.
+    files: ['src/net/**/*.ts', 'entrypoints/*-net.content.ts'],
+    rules: {
+      'no-restricted-globals': [
+        'error',
+        ...['chrome', 'browser'].map((name) => ({
+          name,
+          message: 'MAIN-world code has no extension APIs.',
+        })),
+      ],
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['wxt', 'wxt/*', '#imports'],
+              message: 'MAIN-world code must not depend on the WXT runtime.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // Content scripts inject no CSS or fonts into host pages until the
     // in-page UI phase, which loads them inside its Shadow DOM.
     files: [

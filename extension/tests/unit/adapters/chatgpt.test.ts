@@ -2,10 +2,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  chatgptNetRules,
   conversationIdFromUrl,
   createChatGptAdapter,
 } from '@/src/adapters/chatgpt.ts';
-import { AdapterError } from '@/src/adapters/types.ts';
+import { sendEventComposer } from '@/src/content/send-events.ts';
+import { AdapterError, type Composer } from '@/src/adapters/types.ts';
 
 const streamingHtml = readFileSync(
   resolve('tests/fixtures/sites/chatgpt/composer-streaming.html'),
@@ -28,8 +30,15 @@ function loadComposer(html = composerHtml): void {
   );
 }
 
+/** The main composer of a freshly created adapter. */
+function mainComposer(): Composer {
+  const composer = createChatGptAdapter().getMainComposer();
+  if (!composer) throw new Error('main composer not found');
+  return composer;
+}
+
 function editorOf(): HTMLElement {
-  const editor = createChatGptAdapter().getEditor();
+  const editor = mainComposer().getEditor();
   if (!editor) throw new Error('editor not found in fixture');
   return editor;
 }
@@ -83,18 +92,18 @@ describe('ChatGPT adapter on the composer snapshot', () => {
   });
 
   it('finds the submit button, not the other composer buttons', () => {
-    const button = createChatGptAdapter().getSendButton();
+    const button = mainComposer().getSendButton();
     expect(button?.getAttribute('type')).toBe('submit');
     expect(button?.getAttribute('aria-label')).toBe('Send');
   });
 
   it('reads the prompt text from the snapshot', () => {
-    expect(createChatGptAdapter().readPrompt()).toBe('Draft prompt');
+    expect(mainComposer().readPrompt()).toBe('Draft prompt');
   });
 
   it('reads paragraphs as lines and keeps blank lines', () => {
     setParagraphs(editorOf(), ['first', '', 'third']);
-    expect(createChatGptAdapter().readPrompt()).toBe('first\n\nthird');
+    expect(mainComposer().readPrompt()).toBe('first\n\nthird');
   });
 
   it('reads hard breaks as newlines and ignores the trailing break', () => {
@@ -104,17 +113,17 @@ describe('ChatGPT adapter on the composer snapshot', () => {
     trailing.className = 'ProseMirror-trailingBreak';
     p.append('a', document.createElement('br'), 'b', trailing);
     editor.replaceChildren(p);
-    expect(createChatGptAdapter().readPrompt()).toBe('a\nb');
+    expect(mainComposer().readPrompt()).toBe('a\nb');
   });
 
   it('reads an empty editor as an empty prompt', () => {
     setParagraphs(editorOf(), ['']);
-    expect(createChatGptAdapter().readPrompt()).toBe('');
+    expect(mainComposer().readPrompt()).toBe('');
   });
 
   it('reads non-breaking spaces as spaces', () => {
     setParagraphs(editorOf(), ['a\xA0 b']);
-    expect(createChatGptAdapter().readPrompt()).toBe('a  b');
+    expect(mainComposer().readPrompt()).toBe('a  b');
   });
 
   it('reads nested blocks one line each', () => {
@@ -130,7 +139,7 @@ describe('ChatGPT adapter on the composer snapshot', () => {
     const after = document.createElement('p');
     after.textContent = 'after';
     editor.replaceChildren(list, after);
-    expect(createChatGptAdapter().readPrompt()).toBe('one\ntwo\nafter');
+    expect(mainComposer().readPrompt()).toBe('one\ntwo\nafter');
   });
 
   it('writes through insertText on a full selection and resolves on a match', async () => {
@@ -142,9 +151,9 @@ describe('ChatGPT adapter on the composer snapshot', () => {
       }
       return true;
     });
-    await createChatGptAdapter().writePrompt('line 1\n\nline 3');
+    await mainComposer().writePrompt('line 1\n\nline 3');
     expect(exec).toHaveBeenCalledWith('insertText', false, 'line 1\n\nline 3');
-    expect(createChatGptAdapter().readPrompt()).toBe('line 1\n\nline 3');
+    expect(mainComposer().readPrompt()).toBe('line 1\n\nline 3');
     expect(document.activeElement).toBe(editor);
   });
 
@@ -154,7 +163,7 @@ describe('ChatGPT adapter on the composer snapshot', () => {
       setParagraphs(editor, (value ?? '').split('\n'));
       return true;
     });
-    await createChatGptAdapter().writePrompt('a\r\nb');
+    await mainComposer().writePrompt('a\r\nb');
     expect(exec).toHaveBeenCalledWith('insertText', false, 'a\nb');
   });
 
@@ -164,58 +173,58 @@ describe('ChatGPT adapter on the composer snapshot', () => {
       setParagraphs(editor, ['']);
       return true;
     });
-    await createChatGptAdapter().writePrompt('');
+    await mainComposer().writePrompt('');
     expect(exec).toHaveBeenCalledWith('delete');
   });
 
   it('rejects when the editor does not reflect the written text', async () => {
     stubExecCommand(() => true);
     await expect(
-      createChatGptAdapter().writePrompt('something else'),
+      mainComposer().writePrompt('something else'),
     ).rejects.toMatchObject({ code: 'write-mismatch' });
   });
 
   it('rejects when the browser refuses the edit', async () => {
     stubExecCommand(() => false);
-    await expect(
-      createChatGptAdapter().writePrompt('x'),
-    ).rejects.toBeInstanceOf(AdapterError);
+    await expect(mainComposer().writePrompt('x')).rejects.toBeInstanceOf(
+      AdapterError,
+    );
   });
 
   it('clicks the send button on triggerSend', () => {
-    const adapter = createChatGptAdapter();
+    const composer = mainComposer();
     const onClick = vi.fn((event: Event) => {
       event.preventDefault();
     });
-    adapter.getSendButton()?.addEventListener('click', onClick);
-    adapter.triggerSend();
+    composer.getSendButton()?.addEventListener('click', onClick);
+    composer.triggerSend();
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to send through a disabled button', () => {
-    const adapter = createChatGptAdapter();
-    const button = adapter.getSendButton();
+    const composer = mainComposer();
+    const button = composer.getSendButton();
     if (!(button instanceof HTMLButtonElement)) throw new Error('no button');
     button.disabled = true;
     expect(() => {
-      adapter.triggerSend();
+      composer.triggerSend();
     }).toThrow(AdapterError);
     button.disabled = false;
     button.setAttribute('aria-disabled', 'true');
     expect(() => {
-      adapter.triggerSend();
+      composer.triggerSend();
     }).toThrow(AdapterError);
   });
 
   it('refuses a send button in its stop state', () => {
-    const adapter = createChatGptAdapter();
-    const button = adapter.getSendButton();
+    const composer = mainComposer();
+    const button = composer.getSendButton();
     if (!button) throw new Error('no button');
     button.dataset.testid = 'stop-button';
     const onClick = vi.fn();
     button.addEventListener('click', onClick);
     expect(() => {
-      adapter.triggerSend();
+      composer.triggerSend();
     }).toThrow(expect.objectContaining({ code: 'send-button-stop' }));
     expect(onClick).not.toHaveBeenCalled();
   });
@@ -226,9 +235,9 @@ describe('ChatGPT adapter on the composer snapshot', () => {
       (_, i) => `Paragraph ${i.toString()} ${'x'.repeat(45)}`,
     );
     setParagraphs(editorOf(), lines);
-    const adapter = createChatGptAdapter();
+    const composer = mainComposer();
     const startedAt = performance.now();
-    const text = adapter.readPrompt();
+    const text = composer.readPrompt();
     // jsdom is far slower than Chrome; this budget catches super-linear
     // behaviour, which would take seconds at this size.
     expect(performance.now() - startedAt).toBeLessThan(1000);
@@ -287,7 +296,7 @@ describe('ChatGPT messages', () => {
   it('does not treat the composer as a message', () => {
     loadComposer();
     const adapter = createChatGptAdapter();
-    const editor = adapter.getEditor();
+    const editor = adapter.getMainComposer()?.getEditor();
     if (!editor) throw new Error('no editor');
     expect(adapter.getMessageContainer(editor)).toBeNull();
     expect(adapter.getMessageContainers()).toEqual([]);
@@ -339,19 +348,19 @@ describe('ChatGPT adapter while a reply is streaming', () => {
   });
 
   it('finds the editor and its text', () => {
-    expect(createChatGptAdapter().readPrompt()).toBe('Draft prompt');
+    expect(mainComposer().readPrompt()).toBe('Draft prompt');
   });
 
   it('targets the Send button, which queues the message', () => {
-    const adapter = createChatGptAdapter();
-    const button = adapter.getSendButton();
+    const composer = mainComposer();
+    const button = composer.getSendButton();
     expect(button?.getAttribute('type')).toBe('submit');
     expect(button?.getAttribute('aria-label')).toBe('Send');
     const onClick = vi.fn((event: Event) => {
       event.preventDefault();
     });
     button?.addEventListener('click', onClick);
-    adapter.triggerSend();
+    composer.triggerSend();
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
@@ -367,15 +376,19 @@ describe('ChatGPT adapter without a composer', () => {
     document.body.replaceChildren();
   });
 
-  it('reports missing elements', async () => {
-    const adapter = createChatGptAdapter();
-    expect(adapter.getEditor()).toBeNull();
-    expect(adapter.getSendButton()).toBeNull();
-    expect(() => adapter.readPrompt()).toThrow(AdapterError);
+  it('has no main composer and fails closed if one disappears', async () => {
+    expect(createChatGptAdapter().getMainComposer()).toBeNull();
+
+    loadComposer();
+    const composer = mainComposer();
+    document.body.replaceChildren();
+    expect(composer.getEditor()).toBeNull();
+    expect(composer.getSendButton()).toBeNull();
+    expect(() => composer.readPrompt()).toThrow(AdapterError);
     expect(() => {
-      adapter.triggerSend();
+      composer.triggerSend();
     }).toThrow(AdapterError);
-    await expect(adapter.writePrompt('x')).rejects.toMatchObject({
+    await expect(composer.writePrompt('x')).rejects.toMatchObject({
       code: 'editor-missing',
     });
   });
@@ -385,14 +398,16 @@ describe('ChatGPT adapter without a composer', () => {
     legacy.id = 'prompt-textarea';
     legacy.contentEditable = 'true';
     document.body.append(legacy);
-    expect(createChatGptAdapter().getEditor()).toBe(legacy);
+    expect(mainComposer().getEditor()).toBe(legacy);
   });
 
   it('falls back to the earlier send-button test id', () => {
+    const legacy = document.createElement('div');
+    legacy.id = 'prompt-textarea';
     const button = document.createElement('button');
     button.dataset.testid = 'send-button';
-    document.body.append(button);
-    expect(createChatGptAdapter().getSendButton()).toBe(button);
+    document.body.append(legacy, button);
+    expect(mainComposer().getSendButton()).toBe(button);
   });
 });
 
@@ -429,5 +444,175 @@ describe('ChatGPT URLs', () => {
 
   it('reads the conversation id from the current location', () => {
     expect(adapter.getConversationId()).toBeNull();
+  });
+});
+
+describe('ChatGPT edit-message box', () => {
+  const editBoxHtml = readFileSync(
+    resolve('tests/fixtures/sites/chatgpt/edit-box.html'),
+    'utf8',
+  );
+
+  /** The edit box open in the thread, with the main composer below it. */
+  function loadEditAndComposer(): void {
+    loadComposer(`${editBoxHtml}${composerHtml}`);
+  }
+
+  function editElements() {
+    const form = document.querySelector('form:not([data-chatgpt-composer])');
+    const editor = form?.querySelector<HTMLElement>('[role="textbox"]');
+    const send = form?.querySelector<HTMLElement>('button[type="submit"]');
+    const cancel = form?.querySelector<HTMLElement>('button[type="button"]');
+    if (!form || !editor || !send || !cancel) {
+      throw new Error('edit box not found in fixture');
+    }
+    return { form, editor, send, cancel };
+  }
+
+  beforeEach(loadEditAndComposer);
+
+  it('resolves the edit box from its editor, its Send button and its form', () => {
+    const adapter = createChatGptAdapter();
+    const { form, editor, send } = editElements();
+    for (const target of [editor, editor.firstChild, send, form]) {
+      const composer = adapter.composerFor(target);
+      expect(composer?.kind).toBe('edit');
+      expect(composer?.getEditor()).toBe(editor);
+    }
+  });
+
+  it('reads the stand-in the edit box opens with', () => {
+    const composer = createChatGptAdapter().composerFor(editElements().editor);
+    expect(composer?.readPrompt()).toBe(
+      'Please reply to standin.1@example.net about the plan',
+    );
+  });
+
+  it('never confuses the edit box with the main composer', () => {
+    const adapter = createChatGptAdapter();
+    const { editor, send } = editElements();
+    const main = adapter.getMainComposer();
+    const mainEditor = main?.getEditor();
+    if (!main || !mainEditor) throw new Error('no main composer');
+    expect(mainEditor).not.toBe(editor);
+    expect(main.getSendButton()).not.toBe(send);
+    expect(adapter.composerFor(mainEditor)?.kind).toBe('main');
+    expect(adapter.composerFor(editor)?.getSendButton()).toBe(send);
+  });
+
+  it('does not take the edit box as the main composer when that is absent', () => {
+    loadComposer(editBoxHtml);
+    const adapter = createChatGptAdapter();
+    expect(adapter.getMainComposer()).toBeNull();
+    expect(adapter.composerFor(editElements().editor)?.kind).toBe('edit');
+  });
+
+  it('treats Send, Enter and submit as sends, and Cancel as not a send', () => {
+    const adapter = createChatGptAdapter();
+    const { form, editor, send, cancel } = editElements();
+    const click = () =>
+      new MouseEvent('click', { bubbles: true, cancelable: true });
+    const atTarget = (event: Event, el: EventTarget): Event => {
+      Object.defineProperty(event, 'target', { value: el });
+      return event;
+    };
+    expect(sendEventComposer(adapter, atTarget(click(), send))?.kind).toBe(
+      'edit',
+    );
+    expect(sendEventComposer(adapter, atTarget(click(), cancel))).toBeNull();
+    expect(
+      sendEventComposer(
+        adapter,
+        atTarget(new KeyboardEvent('keydown', { key: 'Enter' }), editor),
+      )?.kind,
+    ).toBe('edit');
+    expect(
+      sendEventComposer(adapter, atTarget(new Event('submit'), form))?.kind,
+    ).toBe('edit');
+  });
+
+  it('clicks the Send button of the edit box on triggerSend', () => {
+    const adapter = createChatGptAdapter();
+    const { editor, send } = editElements();
+    const onEditSend = vi.fn((event: Event) => {
+      event.preventDefault();
+    });
+    send.addEventListener('click', onEditSend);
+    const mainSend = vi.fn((event: Event) => {
+      event.preventDefault();
+    });
+    adapter
+      .getMainComposer()
+      ?.getSendButton()
+      ?.addEventListener('click', mainSend);
+
+    adapter.composerFor(editor)?.triggerSend();
+    expect(onEditSend).toHaveBeenCalledTimes(1);
+    expect(mainSend).not.toHaveBeenCalled();
+  });
+
+  it('fails closed once the edit box has closed', () => {
+    const adapter = createChatGptAdapter();
+    const { form, editor } = editElements();
+    const composer = adapter.composerFor(editor);
+    form.remove();
+    expect(() => composer?.readPrompt()).toThrow(AdapterError);
+    expect(() => {
+      composer?.triggerSend();
+    }).toThrow(AdapterError);
+  });
+
+  it('is not a message container, so restoration never reaches it', () => {
+    const adapter = createChatGptAdapter();
+    expect(adapter.getMessageContainer(editElements().editor)).toBeNull();
+  });
+});
+
+describe('ChatGPT request rules', () => {
+  const url = (path: string, host = 'chatgpt.com') =>
+    new URL(`https://${host}${path}`);
+
+  it.each([
+    ['/backend-api/f/conversation', 'POST', true],
+    ['/backend-api/conversation', 'POST', true],
+    ['/backend-api/f/conversation/prepare', 'post', true],
+    ['/backend-api/f/conversation', 'GET', false],
+    ['/backend-api/conversations', 'POST', false],
+    ['/backend-api/settings', 'POST', false],
+  ] as const)('%s %s → %s', (path, method, expected) => {
+    expect(chatgptNetRules.isMessageEndpoint(url(path), method)).toBe(expected);
+  });
+
+  it('only matches chatgpt.com', () => {
+    expect(
+      chatgptNetRules.isMessageEndpoint(
+        url('/backend-api/f/conversation', 'example.org'),
+        'POST',
+      ),
+    ).toBe(false);
+  });
+
+  it('extracts message text from new-message and edit bodies', () => {
+    const body = {
+      action: 'next',
+      messages: [
+        {
+          author: { role: 'user' },
+          content: { content_type: 'text', parts: ['hello test one'] },
+        },
+      ],
+    };
+    expect(chatgptNetRules.messageTexts(body)).toContain('hello test one');
+  });
+
+  it('has no message text in a regenerate body', () => {
+    expect(
+      chatgptNetRules.messageTexts({ action: 'variant', messages: [] }),
+    ).toEqual([]);
+  });
+
+  it('reports an unexpected shape as null, so everything is checked', () => {
+    expect(chatgptNetRules.messageTexts({ prompt: 'x' })).toBeNull();
+    expect(chatgptNetRules.messageTexts('text')).toBeNull();
   });
 });

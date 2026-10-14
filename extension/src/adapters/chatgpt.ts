@@ -1,4 +1,11 @@
-import { AdapterError, type SiteAdapter } from './types.ts';
+import { collectJsonStrings } from '@/src/core/net/checks.ts';
+import {
+  AdapterError,
+  type Composer,
+  type ComposerKind,
+  type SiteAdapter,
+  type SiteNetRules,
+} from './types.ts';
 
 /**
  * ChatGPT selectors. Each list is tried in order: the first entry is the
@@ -23,6 +30,18 @@ const SELECTORS = {
   // streams and the editor has text, the composer keeps its Send button
   // (clicking it queues the message); this hook is refused regardless.
   stopButton: ['[data-testid="stop-button"]'],
+  // Editing a sent message replaces its bubble with a form inside the user
+  // turn: a ProseMirror textbox, a Cancel button and a submit (Send) button.
+  editForm: [
+    '[data-chatgpt-search-unit-key$=":user"] form:not([data-chatgpt-composer])',
+    // Earlier layouts.
+    '[data-message-author-role="user"] form:not([data-chatgpt-composer])',
+  ],
+  editEditor: [
+    '[contenteditable="true"][role="textbox"]',
+    '.ProseMirror[contenteditable="true"]',
+  ],
+  editSendButton: ['button[type="submit"]'],
   userMessage: [
     // The user's message bubble.
     '[data-user-message-bubble="true"]',
@@ -39,9 +58,24 @@ const SELECTORS = {
   ],
 } as const;
 
+/**
+ * Requests that carry prompt text. New messages and edits are
+ * POST /backend-api/f/conversation with action "next" and the text in
+ * messages[].content.parts; regenerate uses action "variant" with no
+ * messages. The un-prefixed path is the earlier form of the same endpoint.
+ * Every POST below it counts too (e.g. requests prepared while typing), so
+ * draft text sent before the user presses Enter is checked as well.
+ */
+const NET = {
+  hostname: 'chatgpt.com',
+  messagePath: /^\/backend-api\/(?:f\/)?conversation(?:\/|$)/,
+  messageMethod: 'POST',
+} as const;
+
 const USER_MESSAGE = SELECTORS.userMessage.join(', ');
 const ASSISTANT_MESSAGE = SELECTORS.assistantMessage.join(', ');
 const ANY_MESSAGE = `${USER_MESSAGE}, ${ASSISTANT_MESSAGE}`;
+const EDIT_FORM = SELECTORS.editForm.join(', ');
 
 const HOSTNAME = 'chatgpt.com';
 
@@ -73,12 +107,16 @@ function normalise(text: string): string {
 }
 
 function queryFirst(
-  doc: Document,
+  root: ParentNode,
   selectors: readonly string[],
+  accept: (el: HTMLElement) => boolean = () => true,
 ): HTMLElement | null {
   for (const selector of selectors) {
-    const found = doc.querySelector<HTMLElement>(selector);
-    if (found) return found;
+    for (const found of Array.from(
+      root.querySelectorAll<HTMLElement>(selector),
+    )) {
+      if (accept(found)) return found;
+    }
   }
   return null;
 }
@@ -141,30 +179,58 @@ export function conversationIdFromUrl(url: URL): string | null {
   return CONVERSATION_PATH.exec(url.pathname)?.[1] ?? null;
 }
 
-export function createChatGptAdapter(doc: Document = document): SiteAdapter {
-  const getEditor = (): HTMLElement | null => queryFirst(doc, SELECTORS.editor);
+/** Request rules for the MAIN-world safety net. */
+export const chatgptNetRules: SiteNetRules = {
+  isMessageEndpoint: (url, method) =>
+    url.hostname === NET.hostname &&
+    method.toUpperCase() === NET.messageMethod &&
+    NET.messagePath.test(url.pathname),
 
-  const readPrompt = (): string => {
-    const editor = getEditor();
-    if (!editor) throw new AdapterError('editor-missing');
-    return normalise(blockLines(editor).join('\n'));
+  messageTexts(body) {
+    if (typeof body !== 'object' || body === null) return null;
+    const { messages } = body as { messages?: unknown };
+    if (!Array.isArray(messages)) return null;
+    const texts: string[] = [];
+    for (const message of messages) {
+      // Every string in each message's content counts, so text parts nested
+      // in other part types are covered too.
+      const content: unknown =
+        typeof message === 'object' && message !== null
+          ? (message as { content?: unknown }).content
+          : message;
+      texts.push(...collectJsonStrings(content));
+    }
+    return texts;
+  },
+};
+
+/**
+ * A composer backed by a ProseMirror editor. `resolveEditor` and
+ * `resolveSendButton` are re-run on every call, so a re-rendered editor is
+ * found again (main composer) or reported missing (edit box), never guessed.
+ */
+function proseMirrorComposer(
+  doc: Document,
+  kind: ComposerKind,
+  resolveEditor: () => HTMLElement | null,
+  resolveSendButton: () => HTMLElement | null,
+): Composer {
+  const editorOrThrow = (): HTMLElement => {
+    const editor = resolveEditor();
+    if (!editor?.isConnected) throw new AdapterError('editor-missing');
+    return editor;
   };
 
-  const getSendButton = (): HTMLElement | null =>
-    queryFirst(doc, SELECTORS.sendButton);
+  const readPrompt = (): string =>
+    normalise(blockLines(editorOrThrow()).join('\n'));
 
   return {
-    id: 'chatgpt',
-
-    matches: (url) => url.hostname === HOSTNAME,
-
-    getEditor,
-
+    kind,
+    getEditor: resolveEditor,
     readPrompt,
 
     async writePrompt(text) {
-      const editor = getEditor();
-      if (!editor) throw new AdapterError('editor-missing');
+      const editor = editorOrThrow();
       const target = normalise(text);
 
       // Select the whole editor, then replace it through the browser's native
@@ -189,10 +255,10 @@ export function createChatGptAdapter(doc: Document = document): SiteAdapter {
       if (readPrompt() !== target) throw new AdapterError('write-mismatch');
     },
 
-    getSendButton,
+    getSendButton: resolveSendButton,
 
     triggerSend() {
-      const button = getSendButton();
+      const button = resolveSendButton();
       if (!button) throw new AdapterError('send-button-missing');
       const disabled =
         (button instanceof HTMLButtonElement && button.disabled) ||
@@ -202,6 +268,67 @@ export function createChatGptAdapter(doc: Document = document): SiteAdapter {
         throw new AdapterError('send-button-stop');
       }
       button.click();
+    },
+  };
+}
+
+export function createChatGptAdapter(doc: Document = document): SiteAdapter {
+  const isInEditForm = (el: Element): boolean => el.closest(EDIT_FORM) !== null;
+
+  // Fallback selectors must never pick up an edit box as the main editor.
+  const mainEditor = (): HTMLElement | null =>
+    queryFirst(doc, SELECTORS.editor, (el) => !isInEditForm(el));
+  const mainSendButton = (): HTMLElement | null =>
+    queryFirst(doc, SELECTORS.sendButton, (el) => !isInEditForm(el));
+
+  const mainComposer = proseMirrorComposer(
+    doc,
+    'main',
+    mainEditor,
+    mainSendButton,
+  );
+
+  const editComposer = (form: HTMLFormElement): Composer | null => {
+    const editor = queryFirst(form, SELECTORS.editEditor);
+    if (!editor) return null;
+    return proseMirrorComposer(
+      doc,
+      'edit',
+      () => (editor.isConnected ? editor : null),
+      () =>
+        form.isConnected ? queryFirst(form, SELECTORS.editSendButton) : null,
+    );
+  };
+
+  return {
+    id: 'chatgpt',
+
+    matches: (url) => url.hostname === HOSTNAME,
+
+    getMainComposer: () => (mainEditor() ? mainComposer : null),
+
+    composerFor(target) {
+      const el =
+        target instanceof Element
+          ? target
+          : target instanceof Node
+            ? target.parentElement
+            : null;
+      if (!el) return null;
+
+      // An edit box is checked first: its form is its own composer.
+      const editForm = el.closest<HTMLFormElement>(EDIT_FORM);
+      if (editForm) return editComposer(editForm);
+
+      const editor = mainEditor();
+      if (!editor) return null;
+      const form = editor.closest('form');
+      const button = mainSendButton();
+      const inMain =
+        editor.contains(el) ||
+        (form?.contains(el) ?? false) ||
+        (button?.contains(el) ?? false);
+      return inMain ? mainComposer : null;
     },
 
     getConversationId: () => conversationIdFromUrl(new URL(doc.location.href)),

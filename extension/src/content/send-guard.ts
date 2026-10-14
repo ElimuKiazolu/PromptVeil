@@ -1,6 +1,6 @@
 import type { SiteAdapter } from '@/src/adapters/types.ts';
 import { devlog } from '@/src/shared/devlog.ts';
-import { SEND_EVENT_TYPES, isSendEvent } from './send-events.ts';
+import { SEND_EVENT_TYPES, sendEventComposer } from './send-events.ts';
 
 /**
  * Block-only fallback for a tab whose instance can no longer protect sends:
@@ -17,7 +17,7 @@ export function installSendGuard(
   target: Window = window,
 ): void {
   const block = (event: Event): void => {
-    if (!isSendEvent(adapter, event)) return;
+    if (!sendEventComposer(adapter, event)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     devlog('guard.blocked', { reason: 'context-invalidated' });

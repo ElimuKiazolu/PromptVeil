@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startInstance } from '@/src/content/instance.ts';
+import type { NetBridge } from '@/src/content/net-bridge.ts';
 import type { PromptTransform } from '@/src/content/interceptor.ts';
 import { createSpikeMasker } from '@/src/core/spike-mask.ts';
 import { flush, pressKey, setUp, type Harness } from './harness.ts';
@@ -13,11 +14,23 @@ interface TestInstance {
 
 const HEARTBEAT_MS = 2000;
 
+/** A request safety net that is already confirmed. */
+const readyNet: NetBridge = {
+  isReady: () => true,
+  onReady: (callback) => {
+    callback();
+  },
+  sync: () => undefined,
+};
+
 describe('startInstance', () => {
   let h: Harness;
   const started: TestInstance[] = [];
 
-  const start = (transform?: PromptTransform): TestInstance => {
+  const start = (
+    transform?: PromptTransform,
+    net: NetBridge = readyNet,
+  ): TestInstance => {
     const masker = createSpikeMasker();
     let valid = true;
     const instance: TestInstance = {
@@ -31,6 +44,7 @@ describe('startInstance', () => {
       adapter: h.adapter,
       transform: instance.transform,
       source: masker.source,
+      net,
       isContextValid: () => valid,
       signal: instance.frameworkAbort.signal,
       heartbeatMs: HEARTBEAT_MS,
@@ -192,5 +206,48 @@ describe('startInstance', () => {
     h.message.textContent = 'Again standin.1@example.net';
     await nextFrame();
     expect(h.message.textContent).toBe('Again standin.1@example.net');
+  });
+
+  it('blocks sends and holds back restoration until the net is confirmed', async () => {
+    let ready = false;
+    const waiting: (() => void)[] = [];
+    const sync = vi.fn();
+    const pendingNet: NetBridge = {
+      isReady: () => ready,
+      onReady: (callback) => {
+        if (ready) callback();
+        else waiting.push(callback);
+      },
+      sync,
+    };
+    const instance = start(undefined, pendingNet);
+
+    h.editor.textContent = 'Test dana@example.com';
+    const enter = pressKey(h.editor, { key: 'Enter' });
+    await flush();
+    expect(enter.defaultPrevented).toBe(true);
+    expect(instance.transform).not.toHaveBeenCalled();
+    expect(h.siteSends).toEqual([]);
+
+    // Nothing is restored while the net is missing.
+    h.message.textContent = 'standin.1@example.net';
+    await Promise.resolve();
+    vi.advanceTimersByTime(50);
+    expect(h.message.textContent).toBe('standin.1@example.net');
+
+    ready = true;
+    for (const callback of waiting.splice(0)) callback();
+    pressKey(h.editor, { key: 'Enter' });
+    await flush();
+    expect(h.siteSends).toEqual(['Test standin.1@example.net']);
+    // The net learned the new mapping before the masked text was sent.
+    expect(sync).toHaveBeenCalled();
+    expect(sync.mock.calls.at(-1)?.[0]).toEqual([
+      {
+        standIn: 'standin.1@example.net',
+        real: 'dana@example.com',
+        boundary: 'email',
+      },
+    ]);
   });
 });

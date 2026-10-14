@@ -1,6 +1,10 @@
-import { AdapterError, type SiteAdapter } from '@/src/adapters/types.ts';
+import {
+  AdapterError,
+  type Composer,
+  type SiteAdapter,
+} from '@/src/adapters/types.ts';
 import { devlog, type DevReason } from '@/src/shared/devlog.ts';
-import { SEND_EVENT_TYPES, isSendEvent } from './send-events.ts';
+import { SEND_EVENT_TYPES, sendEventComposer } from './send-events.ts';
 
 export type PromptTransform = (text: string) => string | Promise<string>;
 
@@ -13,6 +17,8 @@ export interface InterceptorOptions {
   isContextValid: () => boolean;
   /** Called when a send finds the extension context gone. */
   onOrphaned: () => void;
+  /** False until the request safety net is confirmed; sends are blocked. */
+  isNetReady: () => boolean;
   target?: Window;
 }
 
@@ -38,14 +44,15 @@ function block(event: Event): void {
 }
 
 /**
- * Holds every user send, runs `transform` on the prompt, writes the result
- * back into the editor and then sends it through the site's own control.
+ * Holds every user send from any composer (the main one or an edit box),
+ * runs `transform` on its prompt, writes the result back into that same
+ * editor and then sends it through that composer's own control.
  *
  * The event handler itself only runs synchronous checks, snapshots the prompt
  * and blocks the event; the transform, write and send run in a later task.
  *
- * Fails closed: if any step throws, nothing is sent and the editor keeps the
- * user's original text. Once a send has gone through, the editor is never
+ * Fails closed: if any step throws, or the request safety net is not
+ * confirmed, nothing is sent and the editor keeps the user's original text. Once a send has gone through, the editor is never
  * touched again, so text the site keeps queued stays masked.
  */
 export function installInterceptor({
@@ -54,13 +61,14 @@ export function installInterceptor({
   signal,
   isContextValid,
   onOrphaned,
+  isNetReady,
   target = window,
 }: InterceptorOptions): void {
   let busy = false;
   // Set only while our own triggerSend runs, so that send passes through.
   let sendingOurselves = false;
 
-  const send = (): void => {
+  const send = (composer: Composer): void => {
     if (signal.aborted) throw new SendAbort('context-invalidated');
     if (!isContextValid()) {
       onOrphaned();
@@ -68,23 +76,29 @@ export function installInterceptor({
     }
     sendingOurselves = true;
     try {
-      adapter.triggerSend();
+      composer.triggerSend();
     } finally {
       sendingOurselves = false;
     }
   };
 
-  const restore = async (original: string): Promise<void> => {
+  const restore = async (
+    composer: Composer,
+    original: string,
+  ): Promise<void> => {
     try {
-      if (adapter.readPrompt() !== original) {
-        await adapter.writePrompt(original);
+      if (composer.readPrompt() !== original) {
+        await composer.writePrompt(original);
       }
     } catch (error) {
       devlog('send.blocked', { reason: 'restore-failed', error });
     }
   };
 
-  const process = async (original: string): Promise<void> => {
+  const process = async (
+    composer: Composer,
+    original: string,
+  ): Promise<void> => {
     let edited = false;
     try {
       let masked: string;
@@ -95,23 +109,26 @@ export function installInterceptor({
           error instanceof SendAbort ? error.reason : 'transform-failed',
         );
       }
-      if (adapter.readPrompt() !== original) {
+      if (composer.readPrompt() !== original) {
         throw new SendAbort('prompt-changed');
       }
       if (masked !== original) {
         edited = true;
-        await adapter.writePrompt(masked);
+        await composer.writePrompt(masked);
       }
-      send();
+      send(composer);
       devlog(edited ? 'send.masked' : 'send.passthrough');
     } catch (error) {
       devlog('send.blocked', { reason: reasonOf(error), error });
-      if (edited) await restore(original);
+      if (edited) await restore(composer, original);
     }
   };
 
   const onSendEvent = (event: Event): void => {
-    if (sendingOurselves || !isSendEvent(adapter, event)) return;
+    if (sendingOurselves) return;
+    // The send belongs to exactly one composer (main or an edit box).
+    const composer = sendEventComposer(adapter, event);
+    if (!composer) return;
 
     if (busy) {
       block(event);
@@ -126,9 +143,15 @@ export function installInterceptor({
       return;
     }
 
+    if (!isNetReady()) {
+      block(event);
+      devlog('send.blocked', { reason: 'net-missing' });
+      return;
+    }
+
     let original: string;
     try {
-      original = adapter.readPrompt();
+      original = composer.readPrompt();
     } catch (error) {
       block(event);
       devlog('send.blocked', { reason: reasonOf(error), error });
@@ -141,7 +164,7 @@ export function installInterceptor({
     devlog('send.intercepted');
     busy = true;
     setTimeout(() => {
-      void process(original).finally(() => {
+      void process(composer, original).finally(() => {
         busy = false;
       });
     }, 0);
