@@ -43,6 +43,7 @@ function fakeWindow() {
     XMLHttpRequest: FakeXhr,
     WebSocket: FakeWebSocket,
     Navigator: FakeNavigator,
+    navigator: new FakeNavigator(),
     ProgressEvent: Event,
     location: { href: 'https://chatgpt.com/c/abc' },
     setTimeout: (handler: () => void, timeout?: number) =>
@@ -163,6 +164,119 @@ describe('wrapNetwork', () => {
       expect(navigator.sendBeacon('/log?u=secret')).toBe(false);
       expect(env.calls.beacon).toEqual([]);
       expect(seen[0]?.transport).toBe('beacon');
+    });
+  });
+
+  describe('when the page redefines a function after us', () => {
+    const pageNavigator = () =>
+      (env.win as unknown as { navigator: Navigator }).navigator;
+
+    it('keeps checking a beacon after the page assigns its own function', () => {
+      const replaced: unknown[] = [];
+      // A library replaces sendBeacon on the navigator object.
+      pageNavigator().sendBeacon = function (url, data) {
+        replaced.push([url, data]);
+        return true;
+      };
+      expect(pageNavigator().sendBeacon('/log', 'a secret')).toBe(false);
+      expect(pageNavigator().sendBeacon('/log', 'fine')).toBe(true);
+      expect(replaced).toEqual([['/log', 'fine']]);
+    });
+
+    it('keeps checking after the page replaces the prototype function', () => {
+      const replaced: unknown[] = [];
+      env.FakeNavigator.prototype.sendBeacon = function (url, data) {
+        replaced.push([url, data]);
+        return true;
+      };
+      const other = new env.FakeNavigator();
+      expect(other.sendBeacon('/log', 'a secret')).toBe(false);
+      expect(replaced).toEqual([]);
+    });
+
+    it('still guards a function called through the prototype', () => {
+      expect(
+        env.FakeNavigator.prototype.sendBeacon.call(
+          pageNavigator(),
+          '/log',
+          'a secret',
+        ),
+      ).toBe(false);
+      expect(env.calls.beacon).toEqual([]);
+    });
+
+    it('cannot be redefined with defineProperty', () => {
+      expect(() =>
+        Object.defineProperty(pageNavigator(), 'sendBeacon', {
+          value: () => true,
+        }),
+      ).toThrow(TypeError);
+      expect(() =>
+        Object.defineProperty(env.win, 'fetch', {
+          value: () => Promise.resolve(new Response()),
+        }),
+      ).toThrow(TypeError);
+      expect(pageNavigator().sendBeacon('/log', 'a secret')).toBe(false);
+    });
+
+    it('keeps checking fetch after the page restores a "native" function', async () => {
+      const restored: unknown[] = [];
+      env.win.fetch = (input) => {
+        restored.push(input);
+        return Promise.resolve(new Response('restored'));
+      };
+      await expect(
+        env.win.fetch('/x', { method: 'POST', body: 'a secret' }),
+      ).rejects.toThrow(TypeError);
+      expect(restored).toEqual([]);
+      expect(await (await env.win.fetch('/y')).text()).toBe('restored');
+    });
+
+    it('lets a library wrap ours without loops, checking each request', async () => {
+      // The usual wrapping pattern: keep the current function, replace it
+      // with one that calls through.
+      const previous = env.win.fetch.bind(env.win);
+      let wrapperCalls = 0;
+      env.win.fetch = (input, init) => {
+        wrapperCalls += 1;
+        return previous(input, init);
+      };
+      await env.win.fetch('/ok');
+      expect(wrapperCalls).toBe(1);
+      expect(env.calls.fetch).toHaveLength(1);
+      await expect(env.win.fetch('/x?q=secret')).rejects.toThrow(TypeError);
+      expect(env.calls.fetch).toHaveLength(1);
+    });
+
+    it('keeps checking XHR and WebSocket after prototype replacement', () => {
+      const xhrSends: unknown[] = [];
+      const wsSends: unknown[] = [];
+      env.FakeXhr.prototype.send = function (body?: unknown) {
+        xhrSends.push(body);
+      };
+      env.FakeWebSocket.prototype.send = function (data: unknown) {
+        wsSends.push(data);
+      };
+      const xhr = new env.FakeXhr();
+      xhr.open('POST', '/api');
+      xhr.send('a secret');
+      new env.FakeWebSocket().send('a secret');
+      expect(xhrSends).toEqual([]);
+      expect(wsSends).toEqual([]);
+    });
+
+    it('returns the same guarded function each time', () => {
+      const read = (owner: object, name: string): unknown =>
+        Reflect.get(owner, name) as unknown;
+      expect(read(env.win, 'fetch')).toBe(read(env.win, 'fetch'));
+      expect(read(env.FakeXhr.prototype, 'send')).toBe(
+        read(env.FakeXhr.prototype, 'send'),
+      );
+    });
+
+    it('ignores assignments that are not functions', async () => {
+      Reflect.set(env.win, 'fetch', undefined);
+      await expect(env.win.fetch('/x?q=secret')).rejects.toThrow(TypeError);
     });
   });
 });

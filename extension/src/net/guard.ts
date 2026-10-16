@@ -46,6 +46,10 @@ export function installNetGuard(
       for (const s of addition.standIns) {
         standIns.add(normaliseValue('email', s));
       }
+      // Confirms delivery, so a live test can tell whether tier 2 is armed.
+      if (import.meta.env.DEV) {
+        channel.report({ event: 'net.added', count: realValueHashes.size });
+      }
     },
   });
 

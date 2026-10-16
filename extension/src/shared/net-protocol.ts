@@ -96,7 +96,9 @@ export type NetReport =
       transport: NetTransport;
     }
   | { event: 'net.checked'; category: NetCategory; transport: NetTransport }
-  | { event: 'net.failed'; category: NetCategory; transport: NetTransport };
+  | { event: 'net.failed'; category: NetCategory; transport: NetTransport }
+  /** How many masked-value hashes the net now holds (diagnostic). */
+  | { event: 'net.added'; count: number };
 
 const TRANSPORTS: readonly string[] = ['fetch', 'xhr', 'websocket', 'beacon'];
 const CATEGORIES: readonly string[] = ['message', 'other'];
@@ -112,6 +114,12 @@ export function parseReport(detail: unknown): NetReport | null {
   }
   if (typeof parsed !== 'object' || parsed === null) return null;
   const r = parsed as Record<string, unknown>;
+  if (r.event === 'net.added') {
+    const { count } = r;
+    return typeof count === 'number' && Number.isInteger(count) && count >= 0
+      ? { event: 'net.added', count }
+      : null;
+  }
   const transport = r.transport;
   const category = r.category;
   if (typeof transport !== 'string' || !TRANSPORTS.includes(transport))

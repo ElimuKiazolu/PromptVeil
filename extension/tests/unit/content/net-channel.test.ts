@@ -67,6 +67,7 @@ function fakeWindow() {
     XMLHttpRequest: FakeXhr,
     WebSocket: FakeWebSocket,
     Navigator: FakeNavigator,
+    navigator: new FakeNavigator(),
     ProgressEvent: Event,
     location: { href: 'https://chatgpt.com/c/abc' },
     setTimeout: (handler: () => void) => setTimeout(handler, 0),
@@ -283,6 +284,29 @@ describe('installNetGuard', () => {
       win.fetch('https://other.example/?email=dana%40example.com'),
     ).rejects.toThrow(TypeError);
     expect(sent).toEqual([]);
+  });
+
+  it('tier 2 blocks the exact beacon from the live report', () => {
+    const { sent, bridge, FakeNavigator } = setUpGuard();
+    bridge.sync([DANA]);
+    expect(
+      new FakeNavigator().sendBeacon(
+        'https://example.org/x',
+        'dana@example.com',
+      ),
+    ).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
+  it('tier 2 lets the beacon through before the value is masked', () => {
+    const { sent, FakeNavigator } = setUpGuard();
+    expect(
+      new FakeNavigator().sendBeacon(
+        'https://example.org/x',
+        'dana@example.com',
+      ),
+    ).toBe(true);
+    expect(sent).toEqual(['beacon']);
   });
 
   it('tier 2 leaves other emails alone, such as the account email', async () => {

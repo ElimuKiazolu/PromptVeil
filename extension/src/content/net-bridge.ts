@@ -64,6 +64,7 @@ export function startNetBridge(doc: Document = document): NetBridge {
           detail: JSON.stringify(addition),
         }),
       );
+      devlog('net.synced', { count: addition.hashes.length });
     },
   };
 

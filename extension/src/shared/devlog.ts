@@ -27,7 +27,9 @@ export type DevEvent =
   | 'net.blocked'
   | 'net.skipped-binary'
   | 'net.checked'
-  | 'net.failed';
+  | 'net.failed'
+  | 'net.synced'
+  | 'net.added';
 
 export type DevReason =
   | 'editor-missing'
