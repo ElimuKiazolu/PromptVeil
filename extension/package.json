@@ -20,10 +20,12 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage",
     "icons": "node scripts/generate-icons.ts",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "models:fetch": "node scripts/fetch-models.ts"
   },
   "dependencies": {
     "@fontsource/instrument-sans": "5.3.0",
+    "@huggingface/transformers": "4.3.1",
     "@noble/hashes": "2.4.0",
     "@tailwindcss/vite": "4.3.3",
     "react": "19.3.0",

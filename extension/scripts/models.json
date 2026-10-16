@@ -1,0 +1,36 @@
+{
+  "models": [
+    {
+      "id": "onnx-community/distilbert-NER-ONNX",
+      "revision": "3a19fe9404a4469d91aa3d551558a97f68872f67",
+      "note": "Timing only. Repository declares no licence; base model dslim/distilbert-NER is Apache-2.0. Excluded from production builds until the licence decision.",
+      "files": [
+        {
+          "path": "config.json",
+          "size": 965,
+          "sha256": "f109facddb205dac712adf5877e4315fae62041bc0916fe808d92abdb594d1fe"
+        },
+        {
+          "path": "tokenizer.json",
+          "size": 669021,
+          "sha256": "cb26b43c98e8266ae3e99c2a583cf8315d73b33a17e6b20b4df7ff1f22392d34"
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 1335,
+          "sha256": "3c02f7e3bd40e2aca0235ca42256609fd0cd7d883226e17ddea667f1b1314665"
+        },
+        {
+          "path": "special_tokens_map.json",
+          "size": 695,
+          "sha256": "5d5b662e421ea9fac075174bb0688ee0d9431699900b90662acd44b2a350503a"
+        },
+        {
+          "path": "onnx/model_quantized.onnx",
+          "size": 65772734,
+          "sha256": "9419a876387ff2bbe5f21ab7429c7bef93eac86c50353390d4d8fca6e4a210d8"
+        }
+      ]
+    }
+  ]
+}
