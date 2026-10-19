@@ -21,7 +21,9 @@
     "coverage": "vitest run --coverage",
     "icons": "node scripts/generate-icons.ts",
     "postinstall": "wxt prepare",
-    "models:fetch": "node scripts/fetch-models.ts"
+    "models:fetch": "node scripts/fetch-models.ts",
+    "bench:build": "wxt build --mode bench",
+    "bench:build:nocoi": "wxt build --mode bench-nocoi"
   },
   "dependencies": {
     "@fontsource/instrument-sans": "5.3.0",

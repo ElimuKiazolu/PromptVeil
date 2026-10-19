@@ -21,6 +21,19 @@ npm run dev
 
 Run the tests with `npm test`.
 
+### NER benchmark (development only)
+
+The on-device NER timing page is only in separate benchmark builds, never in `npm run dev` or production builds:
+
+```sh
+cd extension
+npm run models:fetch        # once: downloads and verifies the model files
+npm run bench:build         # cross-origin isolated (multi-thread available) → .output/chrome-mv3-bench
+npm run bench:build:nocoi   # not isolated → .output/chrome-mv3-bench-nocoi
+```
+
+Load the build folder unpacked, disable any other PromptVeil copy while benchmarking, and open `chrome-extension://<extension id>/bench.html`. Each button runs one configuration, either through the offscreen document or in a worker started by the page.
+
 ## Repository layout
 
 - `extension/` – the extension (WXT, TypeScript, React, Tailwind)
