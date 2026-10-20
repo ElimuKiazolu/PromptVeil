@@ -30,6 +30,7 @@
     "@huggingface/transformers": "4.3.1",
     "@noble/hashes": "2.4.0",
     "@tailwindcss/vite": "4.3.3",
+    "libphonenumber-js": "1.13.14",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "tailwindcss": "4.3.3"

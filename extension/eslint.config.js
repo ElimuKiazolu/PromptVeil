@@ -62,6 +62,15 @@ export default tseslint.config(
               group: ['wxt', 'wxt/*', '#imports'],
               message: 'src/core must not depend on WXT.',
             },
+            {
+              group: [
+                '**/shared/messaging*',
+                '**/shared/devlog*',
+                '**/shared/extension-context*',
+              ],
+              message:
+                'src/core may import only pure modules from src/shared (types and data).',
+            },
           ],
         },
       ],

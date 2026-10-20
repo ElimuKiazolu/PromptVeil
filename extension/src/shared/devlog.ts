@@ -29,7 +29,9 @@ export type DevEvent =
   | 'net.checked'
   | 'net.failed'
   | 'net.synced'
-  | 'net.added';
+  | 'net.added'
+  | 'message.rejected'
+  | 'message.failed';
 
 export type DevReason =
   | 'editor-missing'
@@ -43,7 +45,11 @@ export type DevReason =
   | 'send-failed'
   | 'context-invalidated'
   | 'net-missing'
-  | 'unexpected-error';
+  | 'unexpected-error'
+  | 'foreign-sender'
+  | 'invalid-shape'
+  | 'handler-failed'
+  | 'timeout';
 
 const PREFIX = '[PromptVeil]';
 

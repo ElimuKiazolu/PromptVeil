@@ -112,7 +112,7 @@ describe('detectEmails', () => {
     it('reports start and end offsets that slice back to the value', () => {
       const text = 'From: dana@example.com, To: ops@example.org.';
       const spans = detectEmails(text);
-      expect(spans).toEqual([
+      expect(spans).toMatchObject([
         { start: 6, end: 22, value: 'dana@example.com' },
         { start: 28, end: 43, value: 'ops@example.org' },
       ]);
@@ -121,8 +121,24 @@ describe('detectEmails', () => {
       }
     });
 
+    it('reports each address as a validated global EMAIL rule detection', () => {
+      expect(detectEmails('Write to dana@example.com.')).toEqual([
+        {
+          type: 'EMAIL',
+          subtype: null,
+          country: null,
+          start: 9,
+          end: 25,
+          value: 'dana@example.com',
+          confidence: 1,
+          validated: true,
+          source: 'rule',
+        },
+      ]);
+    });
+
     it('trims leading punctuation from the local part', () => {
-      expect(detectEmails('--dana@example.com')).toEqual([
+      expect(detectEmails('--dana@example.com')).toMatchObject([
         { start: 2, end: 18, value: 'dana@example.com' },
       ]);
     });
