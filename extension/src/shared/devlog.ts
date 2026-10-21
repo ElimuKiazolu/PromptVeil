@@ -31,7 +31,10 @@ export type DevEvent =
   | 'net.synced'
   | 'net.added'
   | 'message.rejected'
-  | 'message.failed';
+  | 'message.failed'
+  | 'prepass.failed'
+  | 'warmup.done'
+  | 'warmup.failed';
 
 export type DevReason =
   | 'editor-missing'

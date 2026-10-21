@@ -19,7 +19,6 @@
  * first. Letters (vanity numbers, "ext.") are rejected.
  */
 import {
-  getCountries,
   isSupportedCountry,
   parsePhoneNumberFromString,
   type CountryCode as PhoneRegion,
@@ -27,6 +26,12 @@ import {
   type PhoneNumberType,
 } from 'libphonenumber-js/max';
 import { isCountryCode, type CountryCode } from '../../../shared/country.ts';
+import { runBlocking, runSliced, type Checkpoint } from '../schedule.ts';
+import {
+  buildRegionIndex,
+  mayAccept,
+  type RegionIndex,
+} from './phone-regions.ts';
 
 export type PhoneType = PhoneNumberType;
 
@@ -64,9 +69,9 @@ export type PhoneValidation =
     };
 
 const MAX_INPUT = 40;
-/** All-region results kept for reuse (see allRegionCandidates). */
+/** All-region results kept for reuse (see allRegionSteps). */
 const ALL_REGION_CACHE_SIZE = 256;
-const SPACES = new Set([' ', ' ', ' ', ' ', ' ']);
+const SPACES = new Set([' ', '\u00A0', '\u2007', '\u2009', '\u202F']);
 const PUNCTUATION = new Set(['.', '-', '/', '(', ')']);
 
 /**
@@ -146,27 +151,57 @@ function collect(raw: string, regions: Iterable<PhoneRegion>) {
 }
 
 /**
- * Trying every region costs about 16 ms per number on the target laptop, so
- * results are cached by digit string (the only part the parse depends on
- * once the input passed phoneTemplate), least recently used first out. The
- * pipeline re-checks the same prompt as it changes, so most lookups hit.
+ * Trying every region would cost about 16 ms per number on the target laptop
+ * (≈ 65 µs per region parse). The pre-check in phone-regions.ts skips regions
+ * that cannot accept the digits, and results are cached by digit string (the
+ * only part the parse depends on once the input passed phoneTemplate), least
+ * recently used first out. The cache holds real values: memory only, never
+ * persisted, cleared with clearPhoneCache() when the page's instance ends.
  */
 const allRegionCache = new Map<string, readonly PhoneCandidate[]>();
+let regionIndex: RegionIndex | null = null;
 
-function allRegionCandidates(raw: string): readonly PhoneCandidate[] {
-  const key = raw.replace(/\D/gu, '');
-  const cached = allRegionCache.get(key);
-  if (cached !== undefined) {
+function cached(key: string): readonly PhoneCandidate[] | undefined {
+  const hit = allRegionCache.get(key);
+  if (hit !== undefined) {
     allRegionCache.delete(key);
-    allRegionCache.set(key, cached);
-    return cached;
+    allRegionCache.set(key, hit);
   }
-  const candidates = collect(raw, getCountries());
+  return hit;
+}
+
+function remember(key: string, candidates: readonly PhoneCandidate[]): void {
   allRegionCache.set(key, candidates);
   if (allRegionCache.size > ALL_REGION_CACHE_SIZE) {
     const oldest = allRegionCache.keys().next();
     if (oldest.done !== true) allRegionCache.delete(oldest.value);
   }
+}
+
+function* regionIndexSteps(): Generator<void, RegionIndex> {
+  regionIndex ??= yield* buildRegionIndex();
+  return regionIndex;
+}
+
+/** All-region candidates, one region parse per step. */
+function* allRegionSteps(
+  raw: string,
+): Generator<void, readonly PhoneCandidate[]> {
+  const digits = raw.replace(/\D/gu, '');
+  const hit = cached(digits);
+  if (hit !== undefined) return hit;
+  const index = yield* regionIndexSteps();
+  const byNumber = new Map<string, PhoneCandidate>();
+  for (const entry of index.regions) {
+    if (!mayAccept(index, entry, digits)) continue;
+    const phone = parseValid(raw, entry.region);
+    if (phone && !byNumber.has(phone.number)) {
+      byNumber.set(phone.number, candidateOf(phone));
+    }
+    yield;
+  }
+  const candidates = [...byNumber.values()];
+  remember(digits, candidates);
   return candidates;
 }
 
@@ -178,10 +213,10 @@ function* phoneRegions(
   }
 }
 
-export function validatePhone(
+function* validationSteps(
   raw: string,
   homeRegions: readonly CountryCode[],
-): PhoneValidation {
+): Generator<void, PhoneValidation> {
   const template = phoneTemplate(raw);
   if (template === null) return { valid: false };
 
@@ -205,7 +240,7 @@ export function validatePhone(
   );
   if (candidates.length === 0) {
     fromHomeRegions = false;
-    candidates = allRegionCandidates(raw);
+    candidates = yield* allRegionSteps(raw);
   }
   if (candidates.length === 0) return { valid: false };
   return {
@@ -216,6 +251,48 @@ export function validatePhone(
     ambiguous: candidates.length > 1,
     fromHomeRegions,
   };
+}
+
+/** Validates in the current task (may take ~10–20 ms for an uncached foreign number). */
+export function validatePhone(
+  raw: string,
+  homeRegions: readonly CountryCode[],
+): PhoneValidation {
+  return runBlocking(validationSteps(raw, homeRegions));
+}
+
+/** Same result as validatePhone, with the all-region pass split at checkpoints. */
+export function validatePhoneSliced(
+  raw: string,
+  homeRegions: readonly CountryCode[],
+  checkpoint: Checkpoint,
+): Promise<PhoneValidation> {
+  return runSliced(validationSteps(raw, homeRegions), checkpoint);
+}
+
+/** Fixed sample digits (not a real number) that every region gets to parse. */
+const WARM_UP_SAMPLE = '1234567890';
+
+/**
+ * Builds the pre-check index and parses once with every region, so the
+ * first real all-region pass does not pay for compiling the metadata
+ * patterns (≈ 60–120 ms on the target laptop). Nothing is cached.
+ */
+export function warmUpPhone(checkpoint: Checkpoint): Promise<void> {
+  function* steps(): Generator<void, void> {
+    const index = yield* regionIndexSteps();
+    for (const entry of index.regions) {
+      mayAccept(index, entry, WARM_UP_SAMPLE);
+      parseValid(WARM_UP_SAMPLE, entry.region);
+      yield;
+    }
+  }
+  return runSliced(steps(), checkpoint);
+}
+
+/** Forgets every cached all-region result (they are real values). */
+export function clearPhoneCache(): void {
+  allRegionCache.clear();
 }
 
 /**

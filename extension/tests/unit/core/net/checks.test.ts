@@ -8,7 +8,7 @@ import {
   type NetKnowledge,
 } from '@/src/core/net/checks.ts';
 import { createValueHasher } from '@/src/core/net/hash.ts';
-import { isSpikeStandIn } from '@/src/core/spike-mask.ts';
+import { isSpikeStandIn } from '@/src/core/spike-standin.ts';
 
 const hash = createValueHasher('c3'.repeat(32));
 

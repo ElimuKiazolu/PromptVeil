@@ -1,0 +1,30 @@
+{
+  "description": "Text that looks numeric or token-like but holds no personal data: every line must give zero detections with every P0 rule on, whatever the home regions.",
+  "texts": [
+    "Meeting on 2024-10-19, 19/10/2024, 19.10.2024, 10/19/2024, 20241019 and 19-10-2024.",
+    "Born in 1987, moved in 2003; the 1990s and 2000-01-01T00:00:00Z.",
+    "Times: 14:30, 09:05:59, 2:30 PM, 23:59:59.999, 1697712345 seconds is not a phone? It is a timestamp: 2023-10-19 10:45:45.",
+    "Versions v1.2.3, 10.0.19045.3693, 4.3.1-beta.2, node 24.20.0, 1.13.14, Python 3.12.7.",
+    "Build host 192.168.100.200, gateway 10.0.0.1, mask 255.255.255.0, port 192.168.1.10:8080.",
+    "Prices: $1,234,567.89, €2.500.000,00, £1 249.99, 1 234 567 €, ₹12,34,567, USD 12345678.",
+    "Order #12345678901 and order number 1234567890, invoice 2024001234, tracking 1Z999AA10123456784, ref 9876543210123.",
+    "Invoice INV-2024-0042, PO-998877665, ticket #48213907, receipt no. 20241019001.",
+    "ISBN 978-3-16-148410-0 and 0-306-40615-2 and 9780306406157.",
+    "Commit 3f2a9b1c4d5e6f708192a3b4c5d6e7f8091a2b3c and short 3f2a9b1, tag v2.0.0.",
+    "UUID 550e8400-e29b-41d4-a716-446655440000 and 123e4567-e89b-12d3-a456-426614174000.",
+    "Colours #ff6600, #FFF, rgb(255, 102, 0), #1a2b3c4d, hsl(120 100% 50%).",
+    "Maths: 2 + 2 = 4, 1234 * 5678 = 7006652, 3.14159265358979, 1e10, 10^9, x = 12345678.",
+    "Ranges: 10-20, 1990-2024, pages 100-250, 2019/2020 season, 1000-2000 rpm.",
+    "Pi is 3.14159265, e is 2.71828182845, golden ratio 1.6180339887.",
+    "Big numbers: 1,000,000 and 12 345 678 people and 1.234.567 inhabitants.",
+    "File image@2x.png, the @mention, and user@localhost are not addresses.",
+    "Use the getUserProfileSettingsHandler token in AuthenticationServiceProvider2FA.",
+    "password: string; token: undefined, secret = null, apiKey: process.env.API_KEY, pwd = getPassword(), auth = config.auth",
+    "api_key=YOUR_API_KEY, token: \"<your-token-here>\", secret: '${CLIENT_SECRET}', password = \"\", PASSWORD=*****",
+    "Bearer authentication is described in RFC 6750 and Basic authentication in RFC 7617.",
+    "The SHA-256 of the file is 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08.",
+    "Coordinates 51.5074, -0.1278 and 40.7128° N, 74.0060° W.",
+    "Temperatures 21.5°C, 70.7°F; speed 120 km/h; size 1920x1080; ratio 16:9.",
+    "Lottery numbers 4 8 15 16 23 42, table rows 1 2 3 4 5 6 7 8."
+  ]
+}

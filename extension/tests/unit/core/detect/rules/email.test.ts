@@ -133,6 +133,8 @@ describe('detectEmails', () => {
           confidence: 1,
           validated: true,
           source: 'rule',
+          status: 'confirmed',
+          alternatives: [],
         },
       ]);
     });

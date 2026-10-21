@@ -50,6 +50,21 @@ export type EntitySubtype = NationalIdSubtype | BankSubtype;
 
 export type DetectionSource = 'rule' | 'ner' | 'custom' | 'manual';
 
+/**
+ * confirmed: masked automatically. possible: the kind of value is unclear
+ * (e.g. which country's ID it is, or whether it is personal data at all);
+ * shown in the Review panel (P9) and never masked automatically.
+ */
+export type DetectionStatus = 'confirmed' | 'possible';
+
+/** Another reading of the same text: a different format or country. */
+export interface DetectionAlternative {
+  subtype: EntitySubtype | null;
+  country: CountryCode | null;
+  /** 0–1. */
+  confidence: number;
+}
+
 /** One item found in a prompt. Offsets are UTF-16 code units into the prompt. */
 export interface Detection {
   type: EntityType;
@@ -67,6 +82,9 @@ export interface Detection {
   /** True when the value passed its checksum or structural validator. */
   validated: boolean;
   source: DetectionSource;
+  status: DetectionStatus;
+  /** Other readings of an ambiguous value, most likely first; empty otherwise. */
+  alternatives: readonly DetectionAlternative[];
 }
 
 /** AES-GCM ciphertext of a real value. */

@@ -1,4 +1,5 @@
 import type { Detection } from '../../../shared/entities.ts';
+import { finding, type Rule } from './types.ts';
 import {
   MAX_EMAIL_ADDRESS,
   MAX_EMAIL_DOMAIN,
@@ -74,8 +75,26 @@ export function detectEmails(text: string): Detection[] {
       confidence: 1,
       validated: true,
       source: 'rule',
+      status: 'confirmed',
+      alternatives: [],
     });
     lastEnd = end;
   }
   return found;
 }
+
+/** Global EMAIL rule: the scan above already validates each address. */
+export const EMAIL_RULE: Rule = {
+  id: 'global.email',
+  type: 'EMAIL',
+  subtype: null,
+  country: null,
+  find: (text) => detectEmails(text),
+  validate() {
+    return finding(EMAIL_RULE, 'structural');
+  },
+  context: null,
+  contextRequired: false,
+  negativeContext: [],
+  confidence: { validated: 1, context: 1, none: 1 },
+};

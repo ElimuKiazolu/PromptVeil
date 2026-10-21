@@ -183,8 +183,8 @@ describe('validatePhone: national numbers', () => {
 
 describe('validatePhone: input shape', () => {
   it('accepts no-break and thin spaces, dots, slashes and brackets', () => {
-    expect(validatePhone('07400 123456', ['GB']).valid).toBe(true);
-    expect(validatePhone('+44 7400 123456', []).valid).toBe(true);
+    expect(validatePhone('07400\u00A0123456', ['GB']).valid).toBe(true);
+    expect(validatePhone('+44\u202F7400\u2009123456', []).valid).toBe(true);
     expect(validatePhone('07400.123.456', ['GB']).valid).toBe(true);
     expect(validatePhone('(0)7400/123456', ['GB']).valid).toBe(true);
   });

@@ -273,23 +273,91 @@ export function vowelShare(value: string): number {
   return letters === 0 ? 0 : vowels / letters;
 }
 
+/** Limits for the generic high-entropy rule. */
+export interface EntropyThresholds {
+  readonly minLength: number;
+  readonly minEntropy: number;
+  readonly minClassSwitches: number;
+  readonly maxVowelShare: number;
+  /** How many of upper case, lower case and digits must appear (1–3). */
+  readonly minCharacterClasses: number;
+}
+
+export const GENERIC_THRESHOLDS: EntropyThresholds = {
+  minLength: GENERIC_MIN_LENGTH,
+  minEntropy: GENERIC_MIN_ENTROPY,
+  minClassSwitches: GENERIC_MIN_CLASS_SWITCHES,
+  maxVowelShare: GENERIC_MAX_VOWEL_SHARE,
+  minCharacterClasses: 3,
+};
+
+/**
+ * Within a context word's window ("api key", "token", "password", ...) a
+ * token is far more likely to be a credential, so shorter tokens (20 instead
+ * of 32 characters), lower entropy (3.5 instead of 4.0 bits) and two
+ * character classes instead of three count. Class switches stay at 0.30 and
+ * the vowel share is tightened to 0.28: measured on 160,000 word-built
+ * identifiers of 20+ characters (camelCase, PascalCase, snake_case,
+ * kebab-case, upper snake case, with numbers), a vowel limit of 0.40 flagged
+ * 42 % of them, 0.30 flagged 1.0 %, 0.28 flags 0.39 %, while still catching
+ * 75–85 % of random 20–40-character keys (base62, base64url and lower-case
+ * plus digits; the generic rule catches none under 32 characters).
+ * `npm run bench:rules` repeats the measurement.
+ */
+export const CONTEXT_THRESHOLDS: EntropyThresholds = {
+  minLength: 20,
+  minEntropy: 3.5,
+  minClassSwitches: 0.3,
+  maxVowelShare: 0.28,
+  minCharacterClasses: 2,
+};
+
+function characterClasses(value: string): number {
+  return (
+    Number(hasDigit(value)) + Number(hasUpper(value)) + Number(hasLower(value))
+  );
+}
+
 /**
  * The generic rule: a long base64/base64url-alphabet token mixing upper case,
  * lower case and digits, not plain hex (hashes, UUIDs, colours), with high
  * entropy, frequent class changes and few vowels (not made of words), that
  * does not decode to text.
  */
-export function isHighEntropyToken(value: string): boolean {
-  if (value.length < GENERIC_MIN_LENGTH || !GENERIC_CHARS.test(value)) {
+export function isHighEntropyToken(
+  value: string,
+  thresholds: EntropyThresholds = GENERIC_THRESHOLDS,
+): boolean {
+  if (value.length < thresholds.minLength || !GENERIC_CHARS.test(value)) {
     return false;
   }
   if (HEX_OR_SEPARATOR.test(value)) return false;
-  if (!hasDigit(value) || !hasUpper(value) || !hasLower(value)) return false;
-  if (shannonEntropy(value) < GENERIC_MIN_ENTROPY) return false;
-  if (classSwitchRatio(value) < GENERIC_MIN_CLASS_SWITCHES) return false;
-  if (vowelShare(value) > GENERIC_MAX_VOWEL_SHARE) return false;
+  if (characterClasses(value) < thresholds.minCharacterClasses) return false;
+  if (shannonEntropy(value) < thresholds.minEntropy) return false;
+  if (classSwitchRatio(value) < thresholds.minClassSwitches) return false;
+  if (vowelShare(value) > thresholds.maxVowelShare) return false;
   const bytes = decodeBase64(value);
   return bytes === null || !isText(bytes);
+}
+
+const BASIC_CREDENTIALS = /^[A-Za-z0-9+/]+={0,2}$/u;
+
+/**
+ * True when `value` is base64 of "user:password" (HTTP Basic credentials):
+ * printable text without spaces or control characters, a colon, and
+ * something on both sides of it.
+ */
+export function isBasicCredentials(value: string): boolean {
+  if (value.length < 8 || value.length > MAX_TOKEN) return false;
+  if (!BASIC_CREDENTIALS.test(value)) return false;
+  const bytes = decodeBase64(value);
+  if (bytes === null) return false;
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(
+    new Uint8Array(bytes),
+  );
+  const colon = text.indexOf(':');
+  if (colon <= 0 || colon === text.length - 1) return false;
+  return /^[^\s\p{Cc}�]+$/u.test(text);
 }
 
 function knownKind(value: string): SecretKind | null {

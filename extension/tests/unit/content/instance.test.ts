@@ -251,3 +251,63 @@ describe('startInstance', () => {
     ]);
   });
 });
+
+describe('startInstance: draft pre-pass', () => {
+  let h: Harness;
+  let frameworkAbort: AbortController;
+  let valid: boolean;
+  const draft = {
+    prepare: vi.fn<(text: string) => Promise<void>>(() => Promise.resolve()),
+    clear: vi.fn(),
+    dispose: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    h = setUp();
+    frameworkAbort = new AbortController();
+    valid = true;
+    draft.prepare.mockClear();
+    draft.clear.mockClear();
+    draft.dispose.mockClear();
+    const masker = createSpikeMasker();
+    startInstance({
+      adapter: h.adapter,
+      transform: masker.transform,
+      source: masker.source,
+      net: readyNet,
+      isContextValid: () => valid,
+      signal: frameworkAbort.signal,
+      draft,
+      heartbeatMs: HEARTBEAT_MS,
+    });
+  });
+
+  afterEach(() => {
+    frameworkAbort.abort();
+    vi.useRealTimers();
+  });
+
+  it('analyses drafts while the instance is alive', () => {
+    h.editor.textContent = 'Mail dana@example.com';
+    h.editor.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(300);
+    expect(draft.prepare.mock.calls).toEqual([['Mail dana@example.com']]);
+  });
+
+  it('clears cached analyses when the page is hidden', () => {
+    window.dispatchEvent(new Event('pagehide'));
+    expect(draft.clear).toHaveBeenCalledTimes(1);
+    expect(draft.dispose).not.toHaveBeenCalled();
+  });
+
+  it('disposes of the analyses and stops the pre-pass once orphaned', () => {
+    valid = false;
+    vi.advanceTimersByTime(HEARTBEAT_MS);
+    expect(draft.dispose).toHaveBeenCalledTimes(1);
+    h.editor.textContent = 'after';
+    h.editor.dispatchEvent(new Event('input', { bubbles: true }));
+    vi.advanceTimersByTime(300);
+    expect(draft.prepare).not.toHaveBeenCalled();
+  });
+});

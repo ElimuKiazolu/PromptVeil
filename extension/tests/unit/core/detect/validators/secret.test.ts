@@ -5,7 +5,9 @@ import {
   GENERIC_MAX_VOWEL_SHARE,
   GENERIC_MIN_LENGTH,
   classSwitchRatio,
+  isBasicCredentials,
   isHighEntropyToken,
+  CONTEXT_THRESHOLDS,
   normaliseSecret,
   shannonEntropy,
   validateSecret,
@@ -301,5 +303,61 @@ describe('vowelShare', () => {
 describe('normaliseSecret', () => {
   it('keeps the value exactly as written', () => {
     expect(normaliseSecret(' Ab1/ ')).toBe(' Ab1/ ');
+  });
+});
+
+describe('context thresholds', () => {
+  it('accept shorter and two-class keys that the generic rule rejects', () => {
+    const short = 'q8Zt3Xk9Lw2Rb7Nv5Pd1';
+    const lowerAndDigits = 'q8zt3xk9lw2rb7nv5pd1m4c6';
+    expect(isHighEntropyToken(short)).toBe(false);
+    expect(isHighEntropyToken(short, CONTEXT_THRESHOLDS)).toBe(true);
+    expect(isHighEntropyToken(lowerAndDigits, CONTEXT_THRESHOLDS)).toBe(true);
+  });
+
+  it('still reject hex, words and base64 of text', () => {
+    expect(
+      isHighEntropyToken(
+        '9f86d081884c7d659a2feaa0c55ad015',
+        CONTEXT_THRESHOLDS,
+      ),
+    ).toBe(false);
+    expect(
+      isHighEntropyToken('refresh_token_expiry_seconds', CONTEXT_THRESHOLDS),
+    ).toBe(false);
+    // base64 of "the quick brown fox jumps".
+    expect(
+      isHighEntropyToken(
+        'dGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcw',
+        CONTEXT_THRESHOLDS,
+      ),
+    ).toBe(false);
+  });
+
+  it('are documented values', () => {
+    expect(CONTEXT_THRESHOLDS).toEqual({
+      minLength: 20,
+      minEntropy: 3.5,
+      minClassSwitches: 0.3,
+      maxVowelShare: 0.28,
+      minCharacterClasses: 2,
+    });
+  });
+});
+
+describe('isBasicCredentials', () => {
+  it('accepts base64 of user:password (RFC 7617 example and others)', () => {
+    // RFC 7617 section 2: "Aladdin:open sesame" contains a space; the
+    // credentials form used in practice has none.
+    expect(isBasicCredentials('dXNlcjpwYXNzd29yZA==')).toBe(true);
+    expect(isBasicCredentials('YWRtaW46czNjcjN0UGFzcw==')).toBe(true);
+  });
+
+  it('rejects text without a colon, an empty side, spaces or bad base64', () => {
+    expect(isBasicCredentials('aGVsbG8gd29ybGQ=')).toBe(false);
+    expect(isBasicCredentials('OnBhc3N3b3Jk')).toBe(false);
+    expect(isBasicCredentials('QWxhZGRpbjpvcGVuIHNlc2FtZQ==')).toBe(false);
+    expect(isBasicCredentials('not base64!')).toBe(false);
+    expect(isBasicCredentials('YWI=')).toBe(false);
   });
 });

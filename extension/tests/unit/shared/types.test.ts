@@ -2,6 +2,7 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 import {
   COUNTRY_CODES,
   isCountryCode,
+  regionsFromLanguages,
   type CountryCode,
 } from '@/src/shared/country.ts';
 import {
@@ -69,6 +70,8 @@ describe('entity types', () => {
       confidence: 1,
       validated: true,
       source: 'rule',
+      status: 'confirmed',
+      alternatives: [],
     };
     expect(detection.subtype).toBe('UK_NINO');
     expectTypeOf<Detection['source']>().toEqualTypeOf<
@@ -132,5 +135,25 @@ describe('DEFAULT_SETTINGS', () => {
 
   it('is a valid Settings value', () => {
     expectTypeOf(DEFAULT_SETTINGS).toExtend<Settings>();
+  });
+});
+
+describe('regionsFromLanguages', () => {
+  it('takes the region subtag of every language, in order, once', () => {
+    expect(
+      regionsFromLanguages([
+        'en-US',
+        'en-IN',
+        'hi-IN',
+        'en',
+        'zh-Hans-CN',
+        'es-419',
+        'pt_br',
+      ]),
+    ).toEqual(['US', 'IN', 'CN', 'BR']);
+  });
+
+  it('ignores unknown or missing regions', () => {
+    expect(regionsFromLanguages(['en-UK', 'en', 'fr-ZZ', ''])).toEqual([]);
   });
 });

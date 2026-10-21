@@ -1,0 +1,158 @@
+{
+  "description": "Realistic prompts with every expected rule detection, in order. Values are specification examples and published test values only: RFC 2606 example domains, NANP 555-01xx fictional numbers, Ofcom drama numbers (020 7946 0xxx), libphonenumber's example numbers, Stripe test cards, SWIFT IBAN registry examples, AWS and Google documentation example keys. Secret tokens are written as {{NAME}} and built at test time so the repository holds no scanner-matching literals.",
+  "prompts": [
+    {
+      "name": "resume",
+      "homeRegions": ["US"],
+      "text": "Jordan Example\nEmail: jordan.example@example.com | Phone: +1 202 555 0143\nExperience: 2019-2024 Senior Engineer at Example Corp (v2.3.1 release lead)\nPortfolio: https://example.com/jordan?ref=cv",
+      "expected": [
+        {
+          "type": "EMAIL",
+          "value": "jordan.example@example.com",
+          "status": "confirmed"
+        },
+        {
+          "type": "PHONE",
+          "value": "+1 202 555 0143",
+          "status": "confirmed",
+          "country": "US"
+        }
+      ]
+    },
+    {
+      "name": "support ticket",
+      "homeRegions": ["GB"],
+      "text": "Ticket #48213907: customer cannot log in.\nCustomer email: dana@example.org, callback number 020 7946 0018 (UK).\nOrder 1234567890 placed 19/10/2024 at 14:30, total £1 249.99.\nError code 0x80070005, build 10.0.19045.3693.",
+      "expected": [
+        { "type": "EMAIL", "value": "dana@example.org", "status": "confirmed" },
+        {
+          "type": "PHONE",
+          "value": "020 7946 0018",
+          "status": "confirmed",
+          "country": "GB"
+        }
+      ]
+    },
+    {
+      "name": "bank transfer request",
+      "homeRegions": ["DE"],
+      "text": "Please transfer €2,500.00 to IBAN DE89 3704 0044 0532 0130 00 (BIC COBADEFFXXX).\nPay the deposit from card 4111 1111 1111 1111, exp 12/28.\nAlternatively NL91ABNA0417164300. Reference INV-2024-0042.",
+      "expected": [
+        {
+          "type": "BANK",
+          "value": "DE89 3704 0044 0532 0130 00",
+          "status": "confirmed",
+          "country": "DE"
+        },
+        {
+          "type": "CARD",
+          "value": "4111 1111 1111 1111",
+          "status": "confirmed"
+        },
+        {
+          "type": "BANK",
+          "value": "NL91ABNA0417164300",
+          "status": "confirmed",
+          "country": "NL"
+        }
+      ]
+    },
+    {
+      "name": "code snippet with keys",
+      "homeRegions": ["US"],
+      "text": "const config = {\n  apiKey: \"{{GOOGLE_API_KEY}}\",\n  awsAccessKeyId: '{{AWS_ACCESS_KEY}}',\n  password: process.env.DB_PASSWORD,\n  token: string,\n  dbPassword: \"correcthorse\",\n};\ncurl -H \"Authorization: Basic dXNlcjpwYXNzd29yZA==\" https://api.example.com/v1/items\nexport GITHUB_TOKEN={{GITHUB_TOKEN}}\nDATABASE_URL=postgres://app:Xq7Lp2Rv9KtB@db.example.com:5432/app",
+      "expected": [
+        {
+          "type": "SECRET",
+          "value": "{{GOOGLE_API_KEY}}",
+          "status": "confirmed"
+        },
+        {
+          "type": "SECRET",
+          "value": "{{AWS_ACCESS_KEY}}",
+          "status": "confirmed"
+        },
+        { "type": "SECRET", "value": "correcthorse", "status": "possible" },
+        {
+          "type": "SECRET",
+          "value": "dXNlcjpwYXNzd29yZA==",
+          "status": "confirmed"
+        },
+        {
+          "type": "SECRET",
+          "value": "{{GITHUB_TOKEN}}",
+          "status": "confirmed"
+        },
+        { "type": "SECRET", "value": "Xq7Lp2Rv9KtB", "status": "confirmed" }
+      ]
+    },
+    {
+      "name": "text pasted from a PDF",
+      "homeRegions": ["FR"],
+      "text": "Nom :\u00A0Alex Example\r\nIBAN\u00A0: FR14\u00A02004\u00A01010\u00A00505\u00A00001\u200B3M02\u00A0606\r\nCarte\u00A0: 4242\u200B4242\u200B4242\u200B4242\r\nE-mail\u00A0: alex.ex\u00ADample@example.com\r\nTél.\u00A0: 06\u00A012\u00A034\u00A056\u00A078\r\nPortable : ０６ １２ ３４ ５６ ７８",
+      "expected": [
+        {
+          "type": "BANK",
+          "value": "FR14\u00A02004\u00A01010\u00A00505\u00A00001\u200B3M02\u00A0606",
+          "status": "confirmed",
+          "country": "FR"
+        },
+        {
+          "type": "CARD",
+          "value": "4242\u200B4242\u200B4242\u200B4242",
+          "status": "confirmed"
+        },
+        {
+          "type": "EMAIL",
+          "value": "alex.ex\u00ADample@example.com",
+          "status": "confirmed"
+        },
+        {
+          "type": "PHONE",
+          "value": "06\u00A012\u00A034\u00A056\u00A078",
+          "status": "confirmed",
+          "country": "FR"
+        },
+        {
+          "type": "PHONE",
+          "value": "０６ １２ ３４ ５６ ７８",
+          "status": "confirmed",
+          "country": "FR"
+        }
+      ]
+    },
+    {
+      "name": "foreign national numbers (home region GB)",
+      "homeRegions": ["GB"],
+      "text": "My colleague in Bengaluru: 81234 56789. Berlin office 030 123456. Amex 3782 822463 10005. Order 8123456789 shipped; the bare number 8123456789 is unclear.",
+      "expected": [
+        { "type": "PHONE", "value": "81234 56789", "status": "confirmed" },
+        { "type": "PHONE", "value": "030 123456", "status": "confirmed" },
+        { "type": "CARD", "value": "3782 822463 10005", "status": "confirmed" },
+        { "type": "PHONE", "value": "8123456789", "status": "possible" }
+      ]
+    },
+    {
+      "name": "overlaps and adjacent values",
+      "homeRegions": ["US"],
+      "text": "Glued: GB29NWBK60161331926819DE89370400440532013000\nUnsubscribe: https://example.com/u?email=dana@example.org&x=1\nDB: https://bob:Tr0ub4dor3x@db.example.com/x\nSlack: {{SLACK_TOKEN}}",
+      "expected": [
+        {
+          "type": "BANK",
+          "value": "GB29NWBK60161331926819",
+          "status": "confirmed",
+          "country": "GB"
+        },
+        {
+          "type": "BANK",
+          "value": "DE89370400440532013000",
+          "status": "confirmed",
+          "country": "DE"
+        },
+        { "type": "EMAIL", "value": "dana@example.org", "status": "confirmed" },
+        { "type": "SECRET", "value": "Tr0ub4dor3x", "status": "confirmed" },
+        { "type": "SECRET", "value": "{{SLACK_TOKEN}}", "status": "confirmed" }
+      ]
+    }
+  ]
+}

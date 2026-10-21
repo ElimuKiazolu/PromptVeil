@@ -28,6 +28,6 @@ describe('stripGroupSeparators', () => {
 describe('removeNumericSeparators', () => {
   it('removes spaces, hyphens, dots and slashes', () => {
     expect(removeNumericSeparators(' 111.444.777-35 ')).toBe('11144477735');
-    expect(removeNumericSeparators('12/34 56')).toBe('123456');
+    expect(removeNumericSeparators('12/34\u00A056')).toBe('123456');
   });
 });

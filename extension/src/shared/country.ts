@@ -266,3 +266,28 @@ export function isCountryCode(value: string): value is CountryCode {
   // that import this file stay free of top-level side effects.
   return (COUNTRY_CODES as readonly string[]).includes(value);
 }
+
+/**
+ * Home regions from the browser's language list (navigator.languages):
+ * the region subtag of every entry, in order, without duplicates. "en-IN"
+ * gives IN and "zh-Hans-CN" gives CN; entries without a two-letter region
+ * ("en", "es-419") add nothing.
+ */
+export function regionsFromLanguages(
+  languages: readonly string[],
+): CountryCode[] {
+  const regions: CountryCode[] = [];
+  for (const tag of languages) {
+    const subtags = tag.split(/[-_]/u);
+    // The region follows the language and an optional four-letter script.
+    for (const subtag of subtags.slice(1, 3)) {
+      if (subtag.length !== 2) continue;
+      const region = subtag.toUpperCase();
+      if (isCountryCode(region) && !regions.includes(region)) {
+        regions.push(region);
+      }
+      break;
+    }
+  }
+  return regions;
+}

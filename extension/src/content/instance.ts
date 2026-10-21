@@ -1,11 +1,21 @@
 import type { SiteAdapter } from '@/src/adapters/types.ts';
 import { devlog } from '@/src/shared/devlog.ts';
 import type { StandInSource } from '@/src/core/restore/index.ts';
+import { startDraftPrepass } from './draft-prepass.ts';
 import { installInterceptor, type PromptTransform } from './interceptor.ts';
 import type { NetBridge } from './net-bridge.ts';
 import { startRestorer } from './restorer.ts';
 import { installSendGuard } from './send-guard.ts';
 import { INSTANCE_STARTED_EVENT } from './send-events.ts';
+
+/** Background analysis of drafts (see src/core/draft/analyzer.ts). */
+export interface DraftHooks {
+  prepare(text: string): Promise<void>;
+  /** Forget cached results (they hold real values). */
+  clear(): void;
+  /** clear(), for good: the instance is over. */
+  dispose(): void;
+}
 
 export interface InstanceOptions {
   adapter: SiteAdapter;
@@ -18,6 +28,8 @@ export interface InstanceOptions {
   isContextValid: () => boolean;
   /** Aborted by the content-script framework when it invalidates us. */
   signal: AbortSignal;
+  /** Analyses drafts while they are written, so Send finds the work done. */
+  draft?: DraftHooks;
   target?: Window;
   heartbeatMs?: number;
 }
@@ -41,6 +53,7 @@ export function startInstance({
   net,
   isContextValid,
   signal,
+  draft,
   target = window,
   heartbeatMs = DEFAULT_HEARTBEAT_MS,
 }: InstanceOptions): void {
@@ -57,6 +70,7 @@ export function startInstance({
     stopped = true;
     controller.abort();
     clearInterval(heartbeat);
+    draft?.dispose();
     devlog(reason === 'orphaned' ? 'instance.orphaned' : 'instance.superseded');
     installSendGuard(adapter, target);
   };
@@ -78,6 +92,24 @@ export function startInstance({
     isNetReady: () => net.isReady(),
     target,
   });
+
+  if (draft !== undefined) {
+    startDraftPrepass({
+      adapter,
+      prepare: (text) => draft.prepare(text),
+      signal: controller.signal,
+      target,
+    });
+    // Cached analyses hold real values; drop them when the page is hidden
+    // (navigation, or the back/forward cache).
+    target.addEventListener(
+      'pagehide',
+      () => {
+        draft.clear();
+      },
+      { signal: controller.signal },
+    );
+  }
 
   // Real values go back into the page only while the net guards requests.
   net.onReady(() => {

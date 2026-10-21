@@ -23,7 +23,8 @@
     "postinstall": "wxt prepare",
     "models:fetch": "node scripts/fetch-models.ts",
     "bench:build": "wxt build --mode bench",
-    "bench:build:nocoi": "wxt build --mode bench-nocoi"
+    "bench:build:nocoi": "wxt build --mode bench-nocoi",
+    "bench:rules": "node scripts/bench-rules.ts"
   },
   "dependencies": {
     "@fontsource/instrument-sans": "5.3.0",

@@ -5,7 +5,7 @@ import {
   normaliseValue,
   type ValueHasher,
 } from '@/src/core/net/hash.ts';
-import { isSpikeStandIn } from '@/src/core/spike-mask.ts';
+import { isSpikeStandIn } from '@/src/core/spike-standin.ts';
 import { startMainChannel } from './channel.ts';
 import { requestTexts } from './request.ts';
 import { wrapNetwork, type NetWindow } from './wrappers.ts';
