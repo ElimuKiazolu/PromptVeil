@@ -61,9 +61,40 @@ const SKIP_TAGS = new Set([
   'TEXTAREA',
 ]);
 
-/** Text the user can edit is never rewritten (composer, edit boxes). */
-const EDITABLE =
-  '[contenteditable]:not([contenteditable="false"]), textarea, input';
+/**
+ * Protected surfaces: text the user can edit (composer, edit boxes) and any
+ * subtree a rich-text editor manages, editable at the moment or not (an
+ * editor switched to read-only keeps its root class). An editor treats DOM
+ * changes inside it as user edits and may save or sync them to the site, so
+ * nothing in these is ever rewritten: stand-ins stay, and are counted apart
+ * from leaks.
+ */
+const PROTECTED = [
+  '[contenteditable]:not([contenteditable="false"])',
+  'textarea',
+  'input',
+  // ProseMirror, Lexical, Slate, CodeMirror 6, Monaco, Quill.
+  '.ProseMirror',
+  '[data-lexical-editor]',
+  '[data-slate-editor]',
+  '.cm-editor',
+  '.monaco-editor',
+  '.ql-editor',
+].join(', ');
+
+function isProtected(node: Node): boolean {
+  const el = node instanceof Element ? node : node.parentElement;
+  return el?.closest(PROTECTED) != null;
+}
+
+/** Outermost protected surfaces in or around `root`. */
+function protectedSurfaces(root: Element): Element[] {
+  const around = root.closest(PROTECTED);
+  if (around) return [around];
+  return Array.from(root.querySelectorAll(PROTECTED)).filter(
+    (el) => el.parentElement?.closest(PROTECTED) == null,
+  );
+}
 
 interface TextSegment {
   node: Text;
@@ -97,7 +128,7 @@ function collect(root: Element): CollectedText {
         if (
           SKIP_TAGS.has(child.tagName) ||
           child.tagName === 'BR' ||
-          child.matches(EDITABLE)
+          child.matches(PROTECTED)
         ) {
           separate();
           continue;
@@ -109,7 +140,7 @@ function collect(root: Element): CollectedText {
       }
     }
   };
-  if (!root.closest(EDITABLE)) walk(root);
+  if (!root.closest(PROTECTED)) walk(root);
   return { text, segments };
 }
 
@@ -135,7 +166,8 @@ function applyReplacements(
       if (r.start >= segment.start) out += r.real;
       pos = Math.min(r.end, segment.end);
     }
-    if (!touched) continue;
+    // A surface can turn into an editor between collecting and writing.
+    if (!touched || isProtected(segment.node)) continue;
     out += collected.text.slice(pos, segment.end);
     if (out !== segment.node.nodeValue) {
       written.set(segment.node, out);
@@ -189,6 +221,8 @@ export function startRestorer({
   const writtenHref = new WeakMap<Element, string>();
   const settled = new WeakSet<HTMLElement>();
   const quietTimers = new Map<HTMLElement, ReturnType<typeof setTimeout>>();
+  /** Stand-ins last reported per protected surface. */
+  const protectedCounts = new WeakMap<Element, number>();
   let frame: number | null = null;
 
   const isSettled = (container: HTMLElement): boolean =>
@@ -198,6 +232,7 @@ export function startRestorer({
     const anchors = Array.from(block.querySelectorAll('a[href]'));
     if (block instanceof HTMLAnchorElement) anchors.push(block);
     for (const anchor of anchors) {
+      if (isProtected(anchor)) continue;
       const href = anchor.getAttribute('href') ?? '';
       if (!/^mailto:/i.test(href)) continue;
       const found = matcher.find(href);
@@ -242,6 +277,20 @@ export function startRestorer({
     return true;
   };
 
+  /**
+   * Reports stand-ins left in the protected surfaces of a settled message,
+   * once per surface and only when the number changed. Not a leak: those
+   * surfaces are deliberately left alone.
+   */
+  const reportProtected = (container: HTMLElement): void => {
+    for (const surface of protectedSurfaces(container)) {
+      const count = matcher.countOccurrences(surface.textContent);
+      if (protectedCounts.get(surface) === count) continue;
+      protectedCounts.set(surface, count);
+      if (count > 0) devlog('restore.protected', { count });
+    }
+  };
+
   const finalize = (container: HTMLElement): void => {
     clearTimeout(quietTimers.get(container));
     quietTimers.delete(container);
@@ -254,6 +303,7 @@ export function startRestorer({
     devlog('restore.leak-check', {
       count: matcher.countOccurrences(collect(container).text),
     });
+    reportProtected(container);
   };
 
   const markActive = (container: HTMLElement): void => {
@@ -299,6 +349,11 @@ export function startRestorer({
         continue;
       }
       count += restoreBlock(block, container);
+      // Settled messages have no quiet timer; their surfaces are reported
+      // here (each only when its count changes).
+      if (settled.has(container) && adapter.isAssistantMessage(container)) {
+        reportProtected(container);
+      }
     }
     if (count > 0) devlog('restore.applied', { count });
   };

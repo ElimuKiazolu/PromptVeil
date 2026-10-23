@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { detectRules } from '@/src/core/detect/rules/detector.ts';
 import {
   PHONE_RULE,
   findPhoneCandidates,
+  isTimestamp,
 } from '@/src/core/detect/rules/phone.ts';
 import { blockingCheckpoint } from '@/src/core/detect/schedule.ts';
 import type { CountryCode } from '@/src/shared/country.ts';
@@ -13,6 +15,7 @@ const candidates = (text: string): string[] =>
 
 const env = (homeRegions: CountryCode[], hasContext = false) => ({
   homeRegions,
+  preferredRegions: [],
   hasContext,
   checkpoint: blockingCheckpoint(),
 });
@@ -140,5 +143,78 @@ describe('PHONE_RULE.validate', () => {
     ).resolves.toEqual({
       valid: false,
     });
+  });
+});
+
+describe('ranking of foreign readings', () => {
+  it('ranks the region that writes the number this way first: a French mobile with home US is FR', async () => {
+    // libphonenumber's example French mobile number, written the French way.
+    const verdict = await PHONE_RULE.validate('06 12 34 56 78', env(['US']));
+    if (!verdict.valid) throw new Error('expected a valid number');
+    expect(verdict.country).toBe('FR');
+    expect(verdict.alternatives.every((a) => a.type === 'PHONE')).toBe(true);
+    expect(verdict.alternatives.map((a) => a.country)).toContain('AF');
+  });
+
+  it('ranks browser-language regions after home regions', async () => {
+    const verdict = await PHONE_RULE.validate('06 12 34 56 78', {
+      ...env(['US']),
+      preferredRegions: ['AF'],
+    });
+    expect(verdict.valid && verdict.country).toBe('AF');
+  });
+
+  it('falls back to the main region, a known type, then the alphabet for bare runs', async () => {
+    const first = await PHONE_RULE.validate('0612345678', env(['US']));
+    const second = await PHONE_RULE.validate('0612345678', env(['US']));
+    // Deterministic, and the same number in every position.
+    expect(first).toEqual(second);
+    if (!first.valid) throw new Error('expected a valid number');
+    const countries = [
+      first.country,
+      ...first.alternatives.map((a) => a.country),
+    ];
+    expect(new Set(countries).size).toBe(countries.length);
+  });
+});
+
+describe('timestamps are not phone numbers', () => {
+  const detect = async (text: string) =>
+    (
+      await detectRules(text, {
+        homeRegions: ['US'],
+        entityTypes: new Set(['PHONE']),
+        packs: [],
+        exclude: [],
+      })
+    ).map((d) => d.value);
+
+  it.each([
+    '"created_at": 2015550143,',
+    'updated_at=2015550143',
+    'expires 2015550143',
+    '{"iat": 2015550143, "exp": 2015550200}',
+    'ts: 2015550143000',
+    'f(2015550143)',
+  ])(
+    'skips a plausible Unix time in code or next to a time key: %s',
+    async (text) => {
+      expect(await detect(text)).toEqual([]);
+    },
+  );
+
+  it('still finds the same digits with a phone word nearby', async () => {
+    // 201 555 0143: NANP 555-01xx fictional number; as Unix seconds, 2033.
+    expect(await detect('phone: 2015550143,')).toEqual(['2015550143']);
+    expect(await detect('Call me at 2015550143')).toEqual(['2015550143']);
+  });
+
+  it('ignores runs outside 2000–2040 or of other lengths', () => {
+    expect(isTimestamp('x: 9000000000', { start: 3, end: 13 })).toBe(false);
+    expect(isTimestamp('x: 123456789', { start: 3, end: 12 })).toBe(false);
+    expect(isTimestamp('x: 1700000000', { start: 3, end: 13 })).toBe(true);
+    expect(isTimestamp('call 1700000000 now', { start: 5, end: 15 })).toBe(
+      false,
+    );
   });
 });

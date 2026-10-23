@@ -10,6 +10,10 @@
 import type { CountryCode } from '../../../../shared/country.ts';
 import type { EntitySubtype } from '../../../../shared/entities.ts';
 import type { Rule } from '../types.ts';
+import { BR_PACK } from './br.ts';
+import { CA_PACK } from './ca.ts';
+import { GB_PACK } from './gb.ts';
+import { US_PACK } from './us.ts';
 
 /** Check algorithms a stand-in generator may need to satisfy. */
 export type ChecksumKind =
@@ -29,6 +33,15 @@ export interface StandInSpec {
    */
   readonly formats: readonly string[];
   readonly checksum: ChecksumKind | null;
+  /**
+   * Computes the check characters for a payload (the value's characters
+   * before them, without separators); null for formats without any.
+   */
+  readonly checkCharacters: ((payload: string) => string | null) | null;
+  /** The pack's validator: every generated stand-in must pass it. */
+  readonly isValid: (value: string) => boolean;
+  /** Ranges and values the validator rejects, which a stand-in must avoid. */
+  readonly avoid: readonly string[];
 }
 
 export interface CountryPack {
@@ -67,5 +80,13 @@ export function enabledPacks(
   return packs.filter((pack) => idPacks[pack.country] !== false);
 }
 
-/** Every country pack shipped. The P0 packs are added in P3. */
-export const COUNTRY_PACKS: readonly CountryPack[] = [];
+/**
+ * Every country pack shipped, in tie-break order (TR-R3 falls back to rule
+ * order). The remaining P0 packs follow in P3.2 and P3.3.
+ */
+export const COUNTRY_PACKS: readonly CountryPack[] = [
+  US_PACK,
+  GB_PACK,
+  CA_PACK,
+  BR_PACK,
+];

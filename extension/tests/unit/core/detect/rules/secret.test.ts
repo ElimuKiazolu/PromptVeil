@@ -20,6 +20,7 @@ const spans = (rule: Pick<Rule, 'find'>, text: string): string[] =>
 
 const env = (hasContext = false) => ({
   homeRegions: [],
+  preferredRegions: [],
   hasContext,
   checkpoint: blockingCheckpoint(),
 });

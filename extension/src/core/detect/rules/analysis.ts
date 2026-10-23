@@ -11,6 +11,7 @@ import type { CountryPack } from './packs/index.ts';
 
 export interface RulesConfig {
   readonly homeRegions: readonly CountryCode[];
+  readonly preferredRegions: readonly CountryCode[];
   readonly entityTypes: ReadonlySet<EntityType>;
   readonly packs: readonly CountryPack[];
 }

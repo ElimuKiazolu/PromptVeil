@@ -49,6 +49,8 @@ export interface Confidence {
 
 export interface RuleEnv {
   readonly homeRegions: readonly CountryCode[];
+  /** Regions ranked next when a value fits several (browser languages). */
+  readonly preferredRegions: readonly CountryCode[];
   /** True when one of the rule's context words is within its window. */
   readonly hasContext: boolean;
   /** For validators with long-running work (the all-region phone pass). */
@@ -92,6 +94,12 @@ export interface Rule {
    * phone number). They veto it unless a context word is also present.
    */
   readonly negativeContext: readonly ContextWords[];
+  /**
+   * True when the surroundings show the candidate is something else (a
+   * timestamp in code, for example). Like negative context, it is ignored
+   * when a context word is present.
+   */
+  readonly isOther?: (text: string, span: Span) => boolean;
   readonly confidence: Confidence;
 }
 

@@ -124,6 +124,35 @@ export default tseslint.config(
     },
   },
   {
+    // The detector, phone metadata and packs load at run time as
+    // detection.js, after document_start; content scripts may import only
+    // their types (a value import would put them back into the start-up
+    // script).
+    files: ['entrypoints/*.content.ts', 'src/content/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/core/detect/bundle*',
+                '**/core/detect/rules/**',
+                '**/core/detect/validators/**',
+                '**/core/draft/**',
+                'libphonenumber-js',
+                'libphonenumber-js/*',
+              ],
+              allowTypeImports: true,
+              message:
+                'Detection code loads at run time as detection.js; import its types only.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     // The dev logger is the only place in src/ that may write to the console.
     files: ['src/shared/devlog.ts'],
     rules: { 'no-console': 'off' },

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isCountryCode, type CountryCode } from '@/src/shared/country.ts';
 import type { EntityType } from '@/src/shared/entities.ts';
 import { detectRules } from '@/src/core/detect/rules/detector.ts';
+import { COUNTRY_PACKS } from '@/src/core/detect/rules/packs/index.ts';
 import prompts from '../../../../fixtures/rules/prompts.json';
 import negatives from '../../../../fixtures/rules/negatives.json';
 import { SECRET_TOKENS } from './secret-tokens.ts';
@@ -12,6 +13,7 @@ const P0_TYPES = new Set<EntityType>([
   'CARD',
   'BANK',
   'SECRET',
+  'NATIONAL_ID',
 ]);
 
 /** Replaces {{NAME}} with the token built at run time. */
@@ -33,7 +35,7 @@ describe('positive fixtures', () => {
     const detections = await detectRules(input, {
       homeRegions: regions(homeRegions),
       entityTypes: P0_TYPES,
-      packs: [],
+      packs: COUNTRY_PACKS,
       exclude: [],
     });
     expect(
@@ -68,7 +70,7 @@ describe('negative fixtures', () => {
       const detections = await detectRules(text, {
         homeRegions: regions(homeRegions),
         entityTypes: P0_TYPES,
-        packs: [],
+        packs: COUNTRY_PACKS,
         exclude: [],
       });
       expect(detections.map((d) => [d.type, d.value, d.status])).toEqual([]);

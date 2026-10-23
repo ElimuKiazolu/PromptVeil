@@ -80,13 +80,29 @@ const BV_RULE: Rule = {
 const AQ_PACK: CountryPack = {
   country: 'AQ',
   rules: [AQ_RULE],
-  standIns: { US_SSN: { formats: ['#########'], checksum: null } },
+  standIns: {
+    US_SSN: {
+      formats: ['#########'],
+      checksum: null,
+      checkCharacters: null,
+      isValid: () => true,
+      avoid: [],
+    },
+  },
 };
 
 const BV_PACK: CountryPack = {
   country: 'BV',
   rules: [BV_RULE],
-  standIns: { CA_SIN: { formats: ['#########'], checksum: 'luhn' } },
+  standIns: {
+    CA_SIN: {
+      formats: ['#########'],
+      checksum: 'luhn',
+      checkCharacters: null,
+      isValid: isValidLuhn,
+      avoid: [],
+    },
+  },
 };
 
 const IDS_ONLY = new Set<EntityType>(['NATIONAL_ID']);
@@ -303,12 +319,28 @@ describe('overlap resolution order', () => {
         fixedRule('b', 'PHONE', [[4, 10]], 'structural'),
       ]),
     ).toEqual(['PHONE:abcdef']);
-    expect(
-      await select(text, [
+  });
+
+  it('resolves the very same span across types by TR-R3, not by type order', async () => {
+    const pack: CountryPack = {
+      country: 'AQ',
+      rules: [
         fixedRule('a', 'PHONE', [[4, 10]], 'structural'),
         fixedRule('b', 'CARD', [[4, 10]], 'structural'),
-      ]),
-    ).toEqual(['CARD:abcdef']);
+      ],
+      standIns: {},
+    };
+    const [detection] = await detectRules(
+      text,
+      options({ packs: [pack], entityTypes: new Set(['PHONE', 'CARD']) }),
+    );
+    // Equal readings, none checksummed: rule order names the primary, and
+    // the result is only possible.
+    expect(detection).toMatchObject({
+      type: 'PHONE',
+      status: 'possible',
+      alternatives: [{ type: 'CARD' }],
+    });
   });
 
   it('keeps neighbours that touch without a separator', async () => {

@@ -53,6 +53,10 @@ const SELECTORS = {
     '[data-markdown-text-style="assistant-message"]',
     // The reply renderer root inside it.
     '[data-dil-message-id]',
+    // A Writing card reply: an editor view (ProseMirror) holding the
+    // generated text. Recognised so its stand-ins are counted; the text is
+    // editor-managed and never rewritten (see the restorer).
+    '.writing-block-editor',
     // Earlier layouts.
     '[data-message-author-role="assistant"]',
   ],

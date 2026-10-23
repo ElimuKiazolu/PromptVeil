@@ -1,18 +1,9 @@
 import { createChatGptAdapter } from '@/src/adapters/chatgpt.ts';
+import { createLazyDetection } from '@/src/content/detection-loader.ts';
 import { startInstance } from '@/src/content/instance.ts';
 import { startNetBridge } from '@/src/content/net-bridge.ts';
 import { createMainThreadYielder } from '@/src/content/yielder.ts';
-import {
-  clearRuleCaches,
-  rulesAnalysis,
-  warmUpRules,
-} from '@/src/core/detect/rules/analysis.ts';
-import {
-  COUNTRY_PACKS,
-  enabledPacks,
-} from '@/src/core/detect/rules/packs/index.ts';
 import { createCheckpoint } from '@/src/core/detect/schedule.ts';
-import { createDraftAnalyzer } from '@/src/core/draft/analyzer.ts';
 import {
   SPIKE_ENTITY_TYPES,
   createSpikeMasker,
@@ -28,16 +19,27 @@ function randomSessionTag(): string {
   return (value % 36 ** 4).toString(36).padStart(4, '0');
 }
 
-/** Longest wait for an idle period before warming up anyway. */
-const WARM_UP_TIMEOUT_MS = 2000;
+/** Longest wait for an idle period before loading detection anyway. */
+const IDLE_TIMEOUT_MS = 2000;
 
 /** Runs `task` when the page is idle (or after the timeout). */
 function whenIdle(task: () => void): void {
   if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(task, { timeout: WARM_UP_TIMEOUT_MS });
+    requestIdleCallback(task, { timeout: IDLE_TIMEOUT_MS });
   } else {
-    setTimeout(task, WARM_UP_TIMEOUT_MS);
+    setTimeout(task, IDLE_TIMEOUT_MS);
   }
+}
+
+/**
+ * The detection module (detector, phone metadata, country packs), built
+ * apart from this script and listed as a web-accessible resource with a
+ * per-session URL. Loading it after the page has started keeps document_start
+ * light.
+ */
+function importDetectionModule(): Promise<unknown> {
+  const url = browser.runtime.getURL('/detection.js');
+  return import(/* @vite-ignore */ url);
 }
 
 export default defineContentScript({
@@ -53,20 +55,26 @@ export default defineContentScript({
 
     // Until onboarding (P10) stores home regions, they come from the
     // browser's language list.
-    const homeRegions = regionsFromLanguages(navigator.languages);
+    const languageRegions = regionsFromLanguages(navigator.languages);
     const yielder = createMainThreadYielder();
-    const analyzer = createDraftAnalyzer({
-      analyse: rulesAnalysis({
-        homeRegions,
-        entityTypes: SPIKE_ENTITY_TYPES,
-        packs: enabledPacks(COUNTRY_PACKS, DEFAULT_SETTINGS.idPacks),
-      }),
-      yielder,
-      onClear: clearRuleCaches,
+    const detection = createLazyDetection({
+      load: importDetectionModule,
+      create: (module) =>
+        module.createDetection(
+          {
+            homeRegions: languageRegions,
+            preferredRegions: languageRegions,
+            entityTypes: SPIKE_ENTITY_TYPES,
+            idPacks: DEFAULT_SETTINGS.idPacks,
+          },
+          yielder,
+        ),
     });
     const masker = createSpikeMasker({
       sessionTag: randomSessionTag(),
-      detect: (text) => analyzer.analyse(text),
+      // A Send before the module is ready waits for it; if it cannot load,
+      // the transform rejects and the Send is blocked.
+      detect: async (text) => (await detection.ready()).analyse(text),
     });
     startInstance({
       adapter,
@@ -76,29 +84,37 @@ export default defineContentScript({
       isContextValid: isExtensionContextValid,
       signal: ctx.signal,
       draft: {
-        prepare: (text) => analyzer.prepare(text),
+        prepare: async (text) => {
+          await (await detection.ready()).prepare(text);
+        },
         clear: () => {
-          analyzer.clear();
+          detection.current()?.clear();
         },
         dispose: () => {
-          analyzer.dispose();
+          detection.dispose();
           yielder.close();
         },
       },
     });
 
-    // The first all-region phone check compiles libphonenumber's patterns;
-    // do that at idle, in slices, rather than during the first Send.
+    // At idle: load the module, then build its lookup tables in slices, so
+    // neither the page's start nor the first Send pays for them.
     whenIdle(() => {
       if (ctx.signal.aborted) return;
-      warmUpRules(createCheckpoint(yielder, { signal: ctx.signal })).then(
-        () => {
-          devlog('warmup.done');
-        },
-        (error: unknown) => {
-          devlog('warmup.failed', { error });
-        },
-      );
+      detection.start();
+      detection
+        .ready()
+        .then((runtime) =>
+          runtime.warmUp(createCheckpoint(yielder, { signal: ctx.signal })),
+        )
+        .then(
+          () => {
+            devlog('warmup.done');
+          },
+          (error: unknown) => {
+            devlog('warmup.failed', { error });
+          },
+        );
     });
   },
 });

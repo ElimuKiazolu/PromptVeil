@@ -25,6 +25,7 @@ import {
   type PhoneNumber,
   type PhoneNumberType,
 } from 'libphonenumber-js/max';
+import metadata from 'libphonenumber-js/metadata.max.json';
 import { isCountryCode, type CountryCode } from '../../../shared/country.ts';
 import { runBlocking, runSliced, type Checkpoint } from '../schedule.ts';
 import {
@@ -45,6 +46,16 @@ export interface PhoneCandidate {
   e164: string;
   /** Mobile, fixed line, toll free, ...; null when the metadata cannot tell. */
   type: PhoneType | null;
+  /** How the region itself writes this number nationally, e.g. "06 12 34 56 78". */
+  nationalFormat: string;
+}
+
+export interface PhoneOptions {
+  /**
+   * Regions to rank first among foreign readings, after the home regions
+   * (the browser's language regions).
+   */
+  preferredRegions?: readonly CountryCode[];
 }
 
 export type PhoneValidation =
@@ -83,6 +94,14 @@ const REGION_ALIASES: Partial<Record<PhoneRegion, CountryCode>> = {
   TA: 'SH',
 };
 
+/** The calling code's main region: the first one the metadata lists for it. */
+function mainRegion(callingCode: string): CountryCode | null {
+  const regions: readonly string[] | undefined =
+    metadata.country_calling_codes[callingCode];
+  const [first] = regions ?? [];
+  return first === undefined ? null : toCountry(first as PhoneRegion);
+}
+
 function toCountry(region: PhoneRegion | undefined): CountryCode | null {
   if (region === undefined) return null;
   const alias = REGION_ALIASES[region];
@@ -118,7 +137,74 @@ function candidateOf(phone: PhoneNumber): PhoneCandidate {
     nationalNumber: phone.nationalNumber,
     e164: phone.number,
     type: phone.getType() ?? null,
+    nationalFormat: phone.formatNational(),
   };
+}
+
+/** Lengths of the digit groups in a written number: "06 12 34" → [2, 2, 2]. */
+function groupLengths(written: string): string {
+  return written
+    .split(/\D+/u)
+    .filter((group) => group.length > 0)
+    .map((group) => group.length.toString())
+    .join(',');
+}
+
+const KNOWN_TYPES: ReadonlySet<PhoneType> = new Set<PhoneType>([
+  'MOBILE',
+  'FIXED_LINE',
+  'FIXED_LINE_OR_MOBILE',
+]);
+
+/**
+ * Orders the readings of a national number valid in several regions, most
+ * likely first, deterministically:
+ * 1. home regions, in their order;
+ * 2. preferred (browser language) regions, in their order;
+ * 3. regions that write the number with exactly the input's digit grouping
+ *    ("06 12 34 56 78" is how France writes it, not Afghanistan);
+ * 4. the main region of the calling code (US for +1, GB for +44);
+ * 5. a known number type (mobile or fixed line);
+ * 6. alphabetical by region.
+ */
+function rankCandidates(
+  candidates: readonly PhoneCandidate[],
+  raw: string,
+  homeRegions: readonly CountryCode[],
+  preferredRegions: readonly CountryCode[],
+): PhoneCandidate[] {
+  const written = /\D/u.test(raw.trim()) ? groupLengths(raw) : null;
+  const position = (
+    list: readonly CountryCode[],
+    country: CountryCode | null,
+  ) => {
+    const index = country === null ? -1 : list.indexOf(country);
+    return index === -1 ? list.length : index;
+  };
+  const key = (candidate: PhoneCandidate): number[] => [
+    position(homeRegions, candidate.country),
+    position(preferredRegions, candidate.country),
+    written !== null && groupLengths(candidate.nationalFormat) === written
+      ? 0
+      : 1,
+    candidate.country !== null &&
+    mainRegion(candidate.callingCode) === candidate.country
+      ? 0
+      : 1,
+    candidate.type !== null && KNOWN_TYPES.has(candidate.type) ? 0 : 1,
+  ];
+  const keys = new Map(
+    candidates.map((candidate) => [candidate, key(candidate)]),
+  );
+  return [...candidates].sort((a, b) => {
+    const ka = keys.get(a) ?? [];
+    const kb = keys.get(b) ?? [];
+    for (let i = 0; i < ka.length; i += 1) {
+      const diff = (ka[i] ?? 0) - (kb[i] ?? 0);
+      if (diff !== 0) return diff;
+    }
+    return (a.country ?? '~').localeCompare(b.country ?? '~');
+  });
 }
 
 /**
@@ -216,6 +302,7 @@ function* phoneRegions(
 function* validationSteps(
   raw: string,
   homeRegions: readonly CountryCode[],
+  options: PhoneOptions,
 ): Generator<void, PhoneValidation> {
   const template = phoneTemplate(raw);
   if (template === null) return { valid: false };
@@ -247,7 +334,12 @@ function* validationSteps(
     valid: true,
     international: false,
     template,
-    candidates,
+    candidates: rankCandidates(
+      candidates,
+      raw,
+      homeRegions,
+      options.preferredRegions ?? [],
+    ),
     ambiguous: candidates.length > 1,
     fromHomeRegions,
   };
@@ -257,8 +349,9 @@ function* validationSteps(
 export function validatePhone(
   raw: string,
   homeRegions: readonly CountryCode[],
+  options: PhoneOptions = {},
 ): PhoneValidation {
-  return runBlocking(validationSteps(raw, homeRegions));
+  return runBlocking(validationSteps(raw, homeRegions, options));
 }
 
 /** Same result as validatePhone, with the all-region pass split at checkpoints. */
@@ -266,8 +359,9 @@ export function validatePhoneSliced(
   raw: string,
   homeRegions: readonly CountryCode[],
   checkpoint: Checkpoint,
+  options: PhoneOptions = {},
 ): Promise<PhoneValidation> {
-  return runSliced(validationSteps(raw, homeRegions), checkpoint);
+  return runSliced(validationSteps(raw, homeRegions, options), checkpoint);
 }
 
 /** Fixed sample digits (not a real number) that every region gets to parse. */

@@ -7,7 +7,6 @@
  * Mappings live only in this closure for the life of the page.
  */
 import type { Detection, EntityType } from '../shared/entities.ts';
-import { detectRules } from './detect/rules/detector.ts';
 import type { StandInMapping, StandInSource } from './restore/types.ts';
 import { isSpikeStandIn } from './spike-standin.ts';
 
@@ -21,23 +20,15 @@ export interface SpikeMaskerOptions {
    */
   sessionTag?: string;
   /**
-   * The rule detector run on a prompt (normally through the draft analyzer,
-   * so Send reuses the analysis made while typing). Only confirmed EMAIL
-   * detections are masked. Defaults to the detector with EMAIL only.
+   * The rule detector run on a prompt (through the draft analyzer of the
+   * detection module, so Send reuses the analysis made while typing). Only
+   * confirmed EMAIL detections are masked.
    */
-  detect?: (text: string) => Promise<readonly Detection[]>;
+  detect: (text: string) => Promise<readonly Detection[]>;
 }
 
 /** The spike masks email addresses only, until the stand-in engine (P5/P6). */
 export const SPIKE_ENTITY_TYPES: ReadonlySet<EntityType> = new Set(['EMAIL']);
-
-const detectEmailsOnly = (text: string): Promise<Detection[]> =>
-  detectRules(text, {
-    homeRegions: [],
-    entityTypes: SPIKE_ENTITY_TYPES,
-    packs: [],
-    exclude: [],
-  });
 
 export interface SpikeMasker {
   /** Replaces each email with its stand-in. */
@@ -46,10 +37,8 @@ export interface SpikeMasker {
   source: StandInSource;
 }
 
-export function createSpikeMasker(
-  options: SpikeMaskerOptions = {},
-): SpikeMasker {
-  const { sessionTag, detect = detectEmailsOnly } = options;
+export function createSpikeMasker(options: SpikeMaskerOptions): SpikeMasker {
+  const { sessionTag, detect } = options;
   if (sessionTag !== undefined && !SESSION_TAG.test(sessionTag)) {
     throw new RangeError('session tag must be 1-8 lowercase letters or digits');
   }

@@ -172,6 +172,7 @@ describe('rules analysis', () => {
     const analyzer = createDraftAnalyzer({
       analyse: rulesAnalysis({
         homeRegions: ['GB'],
+        preferredRegions: [],
         entityTypes: new Set(['EMAIL', 'PHONE']),
         packs: [],
       }),

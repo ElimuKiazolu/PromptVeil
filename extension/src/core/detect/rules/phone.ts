@@ -21,7 +21,9 @@
 import type { DetectionAlternative } from '../../../shared/entities.ts';
 import type { Span } from '../text.ts';
 import { validatePhoneSliced } from '../validators/phone.ts';
-import { INVALID, finding, type Rule } from './types.ts';
+import { hasContextWord } from './context.ts';
+import { QUANTITY_AFTER, REFERENCE_BEFORE } from './negative.ts';
+import { INVALID, finding, type ContextWords, type Rule } from './types.ts';
 
 const MIN_DIGITS = 7;
 const MAX_DIGITS = 15;
@@ -211,6 +213,11 @@ function isOtherNumber(text: string, shape: Shape): boolean {
   ) {
     return true;
   }
+  // The written forms of national IDs: a US SSN (123-45-6789) and a
+  // Brazilian CPF (390.533.447-05) are never written like phone numbers.
+  const joined = separators.join('');
+  if (groups.join(',') === '3,2,4' && joined === '--') return true;
+  if (groups.join(',') === '3,3,3,2' && joined === '..-') return true;
   // Thousands grouping: 1 234 567, 12.345.678 (a short head, then threes).
   if (
     !shape.international &&
@@ -289,6 +296,51 @@ export function* findPhoneCandidates(text: string): Generator<Span> {
   }
 }
 
+/** 2000-01-01 and 2040-01-01 in Unix seconds. */
+const EPOCH_FROM = 946_684_800;
+const EPOCH_TO = 2_208_988_800;
+
+/** Keys that hold a time in code, configs and logs. */
+const TIME_KEYS: ContextWords = {
+  words: [
+    'timestamp',
+    'ts',
+    'time',
+    'epoch',
+    'date',
+    'created at',
+    'updated at',
+    'modified at',
+    'expires',
+    'expires at',
+    'expiry',
+    'iat',
+    'exp',
+    'nbf',
+  ],
+  before: 24,
+  after: 0,
+};
+
+/** True when the text right around the span looks like code: `x: 1`, `f(1, 2)`. */
+function isInCode(text: string, span: Span): boolean {
+  const before = text.slice(Math.max(0, span.start - 3), span.start).trimEnd();
+  const after = text.slice(span.end, span.end + 3).trimStart();
+  return /[:=([{,]$/u.test(before) || /^[,)}\];]/u.test(after);
+}
+
+/**
+ * A bare 10- or 13-digit run that is a plausible Unix time (seconds or
+ * milliseconds, 2000–2040) next to a time key or in code-like surroundings.
+ */
+export function isTimestamp(text: string, span: Span): boolean {
+  const value = text.slice(span.start, span.end);
+  if (!/^\d{10}$|^\d{13}$/u.test(value)) return false;
+  const seconds = value.length === 13 ? Number(value) / 1000 : Number(value);
+  if (seconds < EPOCH_FROM || seconds > EPOCH_TO) return false;
+  return hasContextWord(text, span, TIME_KEYS) || isInCode(text, span);
+}
+
 /** No separators, no brackets, no "+": just digits. */
 function isBareRun(value: string): boolean {
   return /^\d+$/u.test(value);
@@ -305,11 +357,13 @@ export const PHONE_RULE: Rule = {
       value,
       env.homeRegions,
       env.checkpoint,
+      { preferredRegions: env.preferredRegions },
     );
     if (!result.valid) return INVALID;
     const [primary, ...others] = result.candidates;
     if (primary === undefined) return INVALID;
     const alternatives: DetectionAlternative[] = others.map((candidate) => ({
+      type: 'PHONE',
       subtype: null,
       country: candidate.country,
       confidence: PHONE_RULE.confidence.none,
@@ -358,96 +412,7 @@ export const PHONE_RULE: Rule = {
     after: 16,
   },
   contextRequired: false,
-  negativeContext: [
-    // A reference number, not a number to call.
-    {
-      words: [
-        'order',
-        'invoice',
-        'tracking',
-        'ref',
-        'reference',
-        'ticket',
-        'booking',
-        'confirmation',
-        'receipt',
-        'transaction',
-        'txn',
-        'sku',
-        'serial',
-        'isbn',
-        'awb',
-        'shipment',
-        'parcel',
-        'consignment',
-        'pnr',
-        'claim',
-        'policy number',
-        'case number',
-        'account number',
-        'acct',
-        'id',
-        '#',
-        'no.',
-        'nº',
-        '№',
-        'usd',
-        'eur',
-        'gbp',
-        'inr',
-        'jpy',
-        'cny',
-        'rmb',
-        'aud',
-        'cad',
-        'chf',
-      ],
-      before: 24,
-      after: 0,
-    },
-    // An amount or a quantity.
-    {
-      words: [
-        'usd',
-        'eur',
-        'gbp',
-        'inr',
-        'jpy',
-        'cny',
-        'rmb',
-        'aud',
-        'cad',
-        'chf',
-        'timestamp',
-        'epoch',
-        'seconds',
-        'secs',
-        'ms',
-        'milliseconds',
-        'minutes',
-        'hours',
-        'days',
-        'years',
-        'km',
-        'kg',
-        'kb',
-        'mb',
-        'gb',
-        'bytes',
-        'rpm',
-        'people',
-        'users',
-        'views',
-        'downloads',
-        'times',
-        'items',
-        'rows',
-        'words',
-        'characters',
-      ],
-      before: 0,
-      after: 16,
-    },
-  ],
+  negativeContext: [REFERENCE_BEFORE, QUANTITY_AFTER],
+  isOther: isTimestamp,
   confidence: { validated: 0.95, context: 0.95, none: 0.85 },
 };

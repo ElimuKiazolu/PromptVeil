@@ -28,6 +28,10 @@ import type { EntityType } from '../src/shared/entities.ts';
 import type { CountryCode } from '../src/shared/country.ts';
 import { detectRules } from '../src/core/detect/rules/detector.ts';
 import { warmUpRules } from '../src/core/detect/rules/analysis.ts';
+import {
+  COUNTRY_PACKS,
+  type CountryPack,
+} from '../src/core/detect/rules/packs/index.ts';
 import { createCheckpoint, type Yielder } from '../src/core/detect/schedule.ts';
 import {
   clearPhoneCache,
@@ -46,6 +50,7 @@ const P0: ReadonlySet<EntityType> = new Set<EntityType>([
   'CARD',
   'BANK',
   'SECRET',
+  'NATIONAL_ID',
 ]);
 const HOME: CountryCode[] = ['US'];
 const BUDGET_MS = 20;
@@ -91,6 +96,11 @@ function prompt(seed: number, parts: readonly string[]): string {
 const fake = (...parts: string[]): string => parts.join('');
 
 const TYPICAL: Record<string, string> = {
+  'national IDs': prompt(8, [
+    'My SSN is 536-90-4399 and my NI number AB 12 34 56 C.',
+    'NHS number 999 000 0018, SIN 123 456 782.',
+    'CPF 390.533.447-05, ticket 48213907, invoice 2024001234.',
+  ]),
   'plain prose': prompt(1, []),
   'mixed entities': prompt(2, [
     'Email dana@example.com or ops@example.org.',
@@ -164,12 +174,13 @@ const fmt = (ms: number): string => `${ms.toFixed(1)} ms`;
 async function time(
   text: string,
   types: ReadonlySet<EntityType> = P0,
+  packs: readonly CountryPack[] = COUNTRY_PACKS,
 ): Promise<number> {
   const started = performance.now();
   await detectRules(text, {
     homeRegions: HOME,
     entityTypes: types,
-    packs: [],
+    packs,
     exclude: [],
   });
   return performance.now() - started;
@@ -179,9 +190,12 @@ async function timings(
   text: string,
   runs: number,
   types?: ReadonlySet<EntityType>,
+  packs?: readonly CountryPack[],
 ) {
   const values: number[] = [];
-  for (let run = 0; run < runs; run += 1) values.push(await time(text, types));
+  for (let run = 0; run < runs; run += 1) {
+    values.push(await time(text, types, packs));
+  }
   return { p50: percentile(values, 0.5), p95: percentile(values, 0.95) };
 }
 
@@ -224,7 +238,7 @@ async function longestTask(
   await detectRules(text, {
     homeRegions: HOME,
     entityTypes: P0,
-    packs: [],
+    packs: COUNTRY_PACKS,
     exclude: [],
     checkpoint: createCheckpoint(yielder),
   });
@@ -380,7 +394,28 @@ async function main(): Promise<void> {
   }
   const { p95: allP95 } = await timings(mixed, 200);
   console.log(
-    `  sum ${fmt(total)}; headroom for 12 country packs at p95: ${fmt(BUDGET_MS - allP95)} (${fmt((BUDGET_MS - allP95) / 12)} per pack)`,
+    `  sum ${fmt(total)}; all rules and packs together p95 ${fmt(allP95)}`,
+  );
+
+  console.log('\nCost per country pack (national IDs only, 200 runs each):');
+  const none = new Set<EntityType>(['NATIONAL_ID']);
+  for (const [name, text] of [
+    ['national IDs', TYPICAL['national IDs'] ?? ''],
+    ['mixed entities', mixed],
+    ['plain prose', TYPICAL['plain prose'] ?? ''],
+  ] as const) {
+    const base = await timings(text, 200, none, []);
+    const costs = [];
+    for (const pack of COUNTRY_PACKS) {
+      const { p50, p95 } = await timings(text, 200, none, [pack]);
+      costs.push(
+        `${pack.country} p50 ${fmt(Math.max(0, p50 - base.p50))} p95 ${fmt(Math.max(0, p95 - base.p95))}`,
+      );
+    }
+    console.log(`  ${name.padEnd(16)} ${costs.join(' | ')}`);
+  }
+  console.log(
+    `  headroom at p95 with every rule and these ${COUNTRY_PACKS.length.toString()} packs: ${fmt(BUDGET_MS - allP95)}, ${fmt((BUDGET_MS - allP95) / (12 - COUNTRY_PACKS.length))} for each of the ${(12 - COUNTRY_PACKS.length).toString()} packs still to come`,
   );
 
   console.log('\nWorst case: national numbers no home region accepts');

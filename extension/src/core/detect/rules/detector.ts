@@ -8,11 +8,12 @@
  * 3. Context: a candidate without a required context word is dropped; one
  *    with a negative context word (and no context word) is dropped.
  * 4. Each remaining candidate is validated.
- * 5. Same text, same type, several readings (e.g. two packs' 9-digit IDs):
- *    TR-R3 picks one, preferring (1) a reading with a context word nearby,
+ * 5. Same text, several readings, of any type (two packs' 9-digit IDs, an
+ *    NHS number or a phone number): TR-R3 picks one, preferring (0) a
+ *    reading its validator is sure of, (1) one with a context word nearby,
  *    (2) a home region, (3) the strongest validation. If more than one is
  *    left and none is checksum-validated, the result is "possible". The other
- *    readings become alternatives.
+ *    readings become alternatives (with their type).
  * 6. Overlaps: candidates are taken greedily in this order, skipping any that
  *    overlaps one already taken (spans are half-open, so neighbours that touch
  *    are both kept):
@@ -46,6 +47,11 @@ import type { Finding, Rule, Strength } from './types.ts';
 export interface DetectOptions {
   /** Regions tried first for national phone numbers and preferred in ties. */
   readonly homeRegions: readonly CountryCode[];
+  /**
+   * Regions ranked after the home regions when a value fits several, e.g.
+   * the regions of the browser's languages. None when omitted.
+   */
+  readonly preferredRegions?: readonly CountryCode[];
   /** Entity types to detect; rules of other types do not run. */
   readonly entityTypes: ReadonlySet<EntityType>;
   /** Enabled country packs (see enabledPacks). */
@@ -113,7 +119,7 @@ function confidenceOf(candidate: Candidate, possible: boolean): number {
 }
 
 function readingKey(candidate: Candidate): string {
-  return `${candidate.finding.subtype ?? ''}|${candidate.finding.country ?? ''}`;
+  return `${candidate.rule.type}|${candidate.finding.subtype ?? ''}|${candidate.finding.country ?? ''}`;
 }
 
 /** TR-R3 among candidates with the same span and type. */
@@ -122,6 +128,9 @@ function resolveReadings(
   homeRegions: readonly CountryCode[],
 ): Resolved {
   let pool = [...group];
+  // A reading the validator itself is unsure of loses to a sure one.
+  const sure = pool.filter((candidate) => !candidate.finding.possible);
+  if (sure.length > 0) pool = sure;
   const withContext = pool.filter((candidate) => candidate.hasContext);
   if (withContext.length > 0) pool = withContext;
   const home = pool.filter(
@@ -157,13 +166,14 @@ function resolveReadings(
     if (seen.has(key)) continue;
     seen.add(key);
     alternatives.push({
+      type: candidate.rule.type,
       subtype: candidate.finding.subtype,
       country: candidate.finding.country,
       confidence: confidenceOf(candidate, true),
     });
   }
   for (const alternative of primary.finding.alternatives) {
-    const key = `${alternative.subtype ?? ''}|${alternative.country ?? ''}`;
+    const key = `${alternative.type}|${alternative.subtype ?? ''}|${alternative.country ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     alternatives.push(alternative);
@@ -240,15 +250,21 @@ async function collectCandidates(
       if (rule.contextRequired && !hasContext) continue;
       if (
         !hasContext &&
-        rule.negativeContext.some((negative) =>
+        (rule.negativeContext.some((negative) =>
           hasContextWord(text.text, match, negative),
-        )
+        ) ||
+          rule.isOther?.(text.text, match) === true)
       ) {
         continue;
       }
       const verdict = await rule.validate(
         text.text.slice(match.start, match.end),
-        { homeRegions: options.homeRegions, hasContext, checkpoint },
+        {
+          homeRegions: options.homeRegions,
+          preferredRegions: options.preferredRegions ?? [],
+          hasContext,
+          checkpoint,
+        },
       );
       if (!verdict.valid) continue;
       candidates.push({
@@ -267,7 +283,7 @@ async function collectCandidates(
 function groupReadings(candidates: readonly Candidate[]): Candidate[][] {
   const groups = new Map<string, Candidate[]>();
   for (const candidate of candidates) {
-    const key = `${candidate.rule.type}:${candidate.span.start.toString()}:${candidate.span.end.toString()}`;
+    const key = `${candidate.span.start.toString()}:${candidate.span.end.toString()}`;
     const group = groups.get(key);
     if (group === undefined) groups.set(key, [candidate]);
     else group.push(candidate);

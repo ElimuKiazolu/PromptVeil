@@ -57,8 +57,9 @@ export type DetectionSource = 'rule' | 'ner' | 'custom' | 'manual';
  */
 export type DetectionStatus = 'confirmed' | 'possible';
 
-/** Another reading of the same text: a different format or country. */
+/** Another reading of the same text: a different type, format or country. */
 export interface DetectionAlternative {
+  type: EntityType;
   subtype: EntitySubtype | null;
   country: CountryCode | null;
   /** 0–1. */

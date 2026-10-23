@@ -1,5 +1,5 @@
 {
-  "description": "Text that looks numeric or token-like but holds no personal data: every line must give zero detections with every P0 rule on, whatever the home regions.",
+  "description": "Text that looks numeric or token-like but holds no personal data: every line must give zero detections with every P0 rule and country pack on, whatever the home regions.",
   "texts": [
     "Meeting on 2024-10-19, 19/10/2024, 19.10.2024, 10/19/2024, 20241019 and 19-10-2024.",
     "Born in 1987, moved in 2003; the 1990s and 2000-01-01T00:00:00Z.",
@@ -25,6 +25,12 @@
     "The SHA-256 of the file is 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08.",
     "Coordinates 51.5074, -0.1278 and 40.7128° N, 74.0060° W.",
     "Temperatures 21.5°C, 70.7°F; speed 120 km/h; size 1920x1080; ratio 16:9.",
-    "Lottery numbers 4 8 15 16 23 42, table rows 1 2 3 4 5 6 7 8."
+    "Lottery numbers 4 8 15 16 23 42, table rows 1 2 3 4 5 6 7 8.",
+    "Invoice no. 536904399, account reference 39053344705 and ticket 123456782.",
+    "Order 123-45-6789 shipped; receipt 390.533.447-05 attached.",
+    "Account number 9990000018 and booking ref 999 000 0018.",
+    "Ticket AB123456C was closed; part numbers ab123456c and XY-123456-A.",
+    "Unix times: \"created_at\": 1697712345, \"exp\": 1735689600000, ts=1700000000.",
+    "Serial 0000000000, test value 111.111.111-11 and 000-00-0000."
   ]
 }

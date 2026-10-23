@@ -3,6 +3,7 @@ import { startInstance } from '@/src/content/instance.ts';
 import type { NetBridge } from '@/src/content/net-bridge.ts';
 import type { PromptTransform } from '@/src/content/interceptor.ts';
 import { createSpikeMasker } from '@/src/core/spike-mask.ts';
+import { detectEmailsOnly } from '../spike-detect.ts';
 import { flush, pressKey, setUp, type Harness } from './harness.ts';
 
 interface TestInstance {
@@ -31,7 +32,7 @@ describe('startInstance', () => {
     transform?: PromptTransform,
     net: NetBridge = readyNet,
   ): TestInstance => {
-    const masker = createSpikeMasker();
+    const masker = createSpikeMasker({ detect: detectEmailsOnly });
     let valid = true;
     const instance: TestInstance = {
       frameworkAbort: new AbortController(),
@@ -110,7 +111,7 @@ describe('startInstance', () => {
   it('does not send when the context is lost mid-send', async () => {
     const instance: TestInstance = start((text) => {
       instance.setContextValid(false);
-      return createSpikeMasker().transform(text);
+      return createSpikeMasker({ detect: detectEmailsOnly }).transform(text);
     });
     h.editor.textContent = 'Test dana@example.com';
     pressKey(h.editor, { key: 'Enter' });
@@ -270,7 +271,7 @@ describe('startInstance: draft pre-pass', () => {
     draft.prepare.mockClear();
     draft.clear.mockClear();
     draft.dispose.mockClear();
-    const masker = createSpikeMasker();
+    const masker = createSpikeMasker({ detect: detectEmailsOnly });
     startInstance({
       adapter: h.adapter,
       transform: masker.transform,

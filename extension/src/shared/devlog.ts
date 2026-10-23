@@ -22,6 +22,7 @@ export type DevEvent =
   | 'restore.stopped'
   | 'restore.applied'
   | 'restore.leak-check'
+  | 'restore.protected'
   | 'net.ready'
   | 'net.missing'
   | 'net.blocked'
@@ -33,6 +34,8 @@ export type DevEvent =
   | 'message.rejected'
   | 'message.failed'
   | 'prepass.failed'
+  | 'detection.loaded'
+  | 'detection.failed'
   | 'warmup.done'
   | 'warmup.failed';
 
@@ -52,7 +55,11 @@ export type DevReason =
   | 'foreign-sender'
   | 'invalid-shape'
   | 'handler-failed'
-  | 'timeout';
+  | 'timeout'
+  | 'load-failed'
+  | 'load-timeout'
+  | 'invalid-module'
+  | 'disposed';
 
 const PREFIX = '[PromptVeil]';
 

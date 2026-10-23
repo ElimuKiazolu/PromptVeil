@@ -1,6 +1,13 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'wxt';
 import tailwindcss from '@tailwindcss/vite';
+import { buildDetectionModule } from './scripts/build-detection.ts';
+
+/**
+ * The detection module, loaded by the ChatGPT content script after the page
+ * has started (see scripts/build-detection.ts).
+ */
+const DETECTION_MODULE = 'detection.js';
 
 /** Pages that exist only in benchmark builds (the NER benchmark). */
 const BENCH_ENTRYPOINTS = new Set(['bench', 'offscreen-bench']);
@@ -46,7 +53,14 @@ export default defineConfig({
         }
       }
     },
-    'build:publicAssets': (wxt, files) => {
+    'prepare:publicPaths': (_wxt, paths) => {
+      paths.push(DETECTION_MODULE);
+    },
+    'build:publicAssets': async (wxt, files) => {
+      files.push({
+        relativeDest: DETECTION_MODULE,
+        contents: await buildDetectionModule(wxt.config.mode),
+      });
       if (!BENCH_MODES[wxt.config.mode]) {
         // Model files are for the benchmark only until the model's licence
         // is decided (see the licensing decision for P7).
@@ -80,6 +94,16 @@ export default defineConfig({
       'https://chatgpt.com/*',
       'https://gemini.google.com/*',
       'https://claude.ai/*',
+    ],
+    // Only the content script on chatgpt.com imports it, through a URL that
+    // changes per browser session, so pages cannot use it to detect the
+    // extension.
+    web_accessible_resources: [
+      {
+        resources: [DETECTION_MODULE],
+        matches: ['https://chatgpt.com/*'],
+        use_dynamic_url: true,
+      },
     ],
     content_security_policy: {
       extension_pages:

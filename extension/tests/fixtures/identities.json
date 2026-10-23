@@ -16,7 +16,12 @@
     "nationalId": {
       "type": "SSN",
       "value": "987-65-4321",
-      "source": "SSA reserves 987-65-4320 to 987-65-4329 for use in advertising and fiction."
+      "source": "Reserved, not issuable — must be rejected. SSA reserves 987-65-4320 to 987-65-4329 for use in advertising and fiction."
+    },
+    "validExample": {
+      "type": "SSN",
+      "value": "536-90-4399",
+      "source": "Documented valid example from the python-stdnum us.ssn documentation."
     }
   },
   {
@@ -36,7 +41,12 @@
     "nationalId": {
       "type": "NINO",
       "value": "QQ 12 34 56 A",
-      "source": "HMRC National Insurance manual NIM39110 gives QQ 12 34 56 A as a format example; the QQ prefix is never allocated."
+      "source": "Reserved, not issuable — must be rejected. HMRC National Insurance manual NIM39110 gives QQ 12 34 56 A as a format example; the QQ prefix is never allocated."
+    },
+    "validExample": {
+      "type": "NINO",
+      "value": "AB 12 34 56 C",
+      "source": "Common documentation example (for example the nino-validator README); AB is an allocatable prefix."
     }
   },
   {
@@ -57,6 +67,11 @@
       "type": "Aadhaar",
       "value": "999999990019",
       "source": "Test Aadhaar number from the UIDAI developer tutorial for the sample authentication client."
+    },
+    "validExample": {
+      "type": "Aadhaar",
+      "value": "999999990019",
+      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
     }
   },
   {
@@ -77,6 +92,11 @@
       "type": "CPF",
       "value": "111.444.777-35",
       "source": "Published checksum-valid example from CPF check-digit tutorials (for example valorfinal.com.br), not an official government specimen."
+    },
+    "validExample": {
+      "type": "CPF",
+      "value": "390.533.447-05",
+      "source": "Documented valid example from the python-stdnum br.cpf documentation."
     }
   },
   {
@@ -97,6 +117,11 @@
       "type": "Steuer-ID",
       "value": "65929970489",
       "source": "Published checksum-valid example (ISO 7064 Mod 11,10) from German tax-ID explainers, not an official government specimen."
+    },
+    "validExample": {
+      "type": "Steuer-ID",
+      "value": "65929970489",
+      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
     }
   },
   {
@@ -117,6 +142,11 @@
       "type": "NIR",
       "value": "2 91 01 75 018 002 68",
       "source": "Published checksum-valid worked example of the NIR control-key calculation (97 minus the remainder modulo 97) from French mathematics teaching material, not an official government specimen."
+    },
+    "validExample": {
+      "type": "NIR",
+      "value": "2 91 01 75 018 002 68",
+      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
     }
   },
   {
@@ -137,6 +167,11 @@
       "type": "ID",
       "value": "9807055009087",
       "source": "Published checksum-valid example from the Wikipedia article on the South African identity card, not an official government specimen."
+    },
+    "validExample": {
+      "type": "ID",
+      "value": "9807055009087",
+      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
     }
   },
   {
@@ -157,6 +192,11 @@
       "type": "NRIC",
       "value": "S1234567D",
       "source": "Published checksum-valid example from the open-source singapore-nric validator documentation, not an official government specimen."
+    },
+    "validExample": {
+      "type": "NRIC",
+      "value": "S1234567D",
+      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
     }
   },
   {
@@ -177,6 +217,11 @@
       "type": "Resident ID",
       "value": "11010519491231002X",
       "source": "Published checksum-valid example (GB 11643 check-character method) from technical articles on the standard, not an official government specimen."
+    },
+    "validExample": {
+      "type": "Resident ID",
+      "value": "11010519491231002X",
+      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
     }
   },
   {
@@ -196,7 +241,12 @@
     "nationalId": {
       "type": "SIN",
       "value": "046 454 286",
-      "source": "Published checksum-valid example from the Wikipedia article on the social insurance number, described there as fictitious but valid; not an official government specimen."
+      "source": "Reserved, not issuable — must be rejected. Published checksum-valid example from the Wikipedia article on the social insurance number, described there as fictitious but valid; not an official government specimen."
+    },
+    "validExample": {
+      "type": "SIN",
+      "value": "123 456 782",
+      "source": "Documented valid example from the python-stdnum ca.sin documentation."
     }
   }
 ]

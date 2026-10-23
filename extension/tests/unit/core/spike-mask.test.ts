@@ -1,31 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import { createSpikeMasker } from '@/src/core/spike-mask.ts';
+import { detectEmailsOnly } from '../spike-detect.ts';
 import { detectEmails } from '@/src/core/detect/rules/email.ts';
 
 describe('createSpikeMasker', () => {
   it('replaces an email with a stand-in on example.net', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     expect(await mask('Write to dana.whitfield@example.com today')).toBe(
       'Write to standin.1@example.net today',
     );
   });
 
   it('leaves text without emails unchanged', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     const text = 'No addresses here.\nJust two lines.';
     expect(await mask(text)).toBe(text);
     expect(await mask('')).toBe('');
   });
 
   it('gives each distinct email its own stand-in', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     expect(await mask('a@example.com, b@example.org and c@example.net')).toBe(
       'standin.1@example.net, standin.2@example.net and standin.3@example.net',
     );
   });
 
   it('keeps the same stand-in for the same email across calls', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     expect(await mask('first dana@example.com')).toBe(
       'first standin.1@example.net',
     );
@@ -38,23 +39,27 @@ describe('createSpikeMasker', () => {
   });
 
   it('treats letter case as the same address', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     expect(await mask('Dana@Example.com and dana@example.com')).toBe(
       'standin.1@example.net and standin.1@example.net',
     );
   });
 
   it('keeps separate maskers independent', async () => {
-    expect(await createSpikeMasker().transform('x@example.com')).toBe(
-      'standin.1@example.net',
-    );
-    expect(await createSpikeMasker().transform('y@example.com')).toBe(
-      'standin.1@example.net',
-    );
+    expect(
+      await createSpikeMasker({ detect: detectEmailsOnly }).transform(
+        'x@example.com',
+      ),
+    ).toBe('standin.1@example.net');
+    expect(
+      await createSpikeMasker({ detect: detectEmailsOnly }).transform(
+        'y@example.com',
+      ),
+    ).toBe('standin.1@example.net');
   });
 
   it('keeps surrounding text in place when lengths differ', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     const text =
       'Short a@b.co then a much longer address dana.whitfield+billing@mail.example.com.\nEnd.';
     expect(await mask(text)).toBe(
@@ -63,13 +68,13 @@ describe('createSpikeMasker', () => {
   });
 
   it('does not mask a stand-in it already issued', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     const masked = await mask('dana@example.com');
     expect(await mask(`edited: ${masked}`)).toBe(`edited: ${masked}`);
   });
 
   it('produces output whose emails are only stand-ins', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     const masked = await mask(
       '(a@example.com) "b@example.org" <c@example.co.uk>.',
     );
@@ -81,7 +86,9 @@ describe('createSpikeMasker', () => {
   });
 
   it('exposes the issued mappings as a stand-in source', async () => {
-    const { transform, source } = createSpikeMasker();
+    const { transform, source } = createSpikeMasker({
+      detect: detectEmailsOnly,
+    });
     expect(source.version).toBe(0);
     expect(source.mappings()).toEqual([]);
 
@@ -106,7 +113,10 @@ describe('createSpikeMasker', () => {
   });
 
   it('tags stand-ins with the page-load tag so numbers never collide', async () => {
-    const { transform, source } = createSpikeMasker({ sessionTag: 'k3f9' });
+    const { transform, source } = createSpikeMasker({
+      sessionTag: 'k3f9',
+      detect: detectEmailsOnly,
+    });
     expect(await transform('mail dana@example.com')).toBe(
       'mail standin.1.k3f9@example.net',
     );
@@ -118,7 +128,7 @@ describe('createSpikeMasker', () => {
   });
 
   it('masks emails written with full-width characters or zero-width characters inside', async () => {
-    const mask = createSpikeMasker().transform;
+    const mask = createSpikeMasker({ detect: detectEmailsOnly }).transform;
     expect(await mask('mail ｄａｎａ＠ｅｘａｍｐｌｅ．ｃｏｍ now')).toBe(
       'mail standin.1@example.net now',
     );
@@ -171,8 +181,8 @@ describe('createSpikeMasker', () => {
   });
 
   it('rejects a malformed session tag', () => {
-    expect(() => createSpikeMasker({ sessionTag: 'Bad Tag' })).toThrow(
-      RangeError,
-    );
+    expect(() =>
+      createSpikeMasker({ sessionTag: 'Bad Tag', detect: detectEmailsOnly }),
+    ).toThrow(RangeError);
   });
 });
