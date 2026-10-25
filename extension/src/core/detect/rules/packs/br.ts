@@ -8,7 +8,7 @@
  * 2. Numbers made of one repeated digit pass the check but are never issued,
  * so they are rejected.
  */
-import { REFERENCE_BEFORE } from '../negative.ts';
+import { ID_REFERENCE_BEFORE } from '../negative.ts';
 import type { Span } from '../../text.ts';
 import { INVALID, finding, type Rule } from '../types.ts';
 import { isRepeatedDigit } from './common.ts';
@@ -76,7 +76,7 @@ export const BR_CPF_RULE: Rule = {
     after: 16,
   },
   contextRequired: false,
-  negativeContext: [REFERENCE_BEFORE],
+  negativeContext: [ID_REFERENCE_BEFORE],
   confidence: { validated: 1, context: 1, none: 1 },
 };
 

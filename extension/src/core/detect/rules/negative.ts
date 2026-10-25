@@ -94,3 +94,18 @@ export const QUANTITY_AFTER: ContextWords = {
   before: 0,
   after: 16,
 };
+
+/**
+ * Words that label an identity number rather than a reference ("ID 3604…",
+ * "ID no. 7503…"); they must not veto national IDs.
+ */
+const ID_LABELS = new Set(['id', 'no.', 'nº', '№']);
+
+/** Reference words and currency codes before a national ID candidate. */
+export const ID_REFERENCE_BEFORE: ContextWords = {
+  words: [...REFERENCE_WORDS, ...CURRENCY_CODES].filter(
+    (word) => !ID_LABELS.has(word),
+  ),
+  before: 24,
+  after: 0,
+};

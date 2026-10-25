@@ -118,6 +118,7 @@ describe('DEFAULT_SETTINGS', () => {
       CA_SIN: 'CA',
       BR_CPF: 'BR',
       IN_AADHAAR: 'IN',
+      IN_VID: 'IN',
       IN_PAN: 'IN',
       CN_RIC: 'CN',
       SG_NRIC: 'SG',

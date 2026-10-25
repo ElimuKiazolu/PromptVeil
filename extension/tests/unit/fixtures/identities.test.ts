@@ -6,6 +6,10 @@ import { isValidCpf } from '@/src/core/detect/rules/packs/br.ts';
 import { isValidSin } from '@/src/core/detect/rules/packs/ca.ts';
 import { isValidNino } from '@/src/core/detect/rules/packs/gb.ts';
 import { isValidSsn } from '@/src/core/detect/rules/packs/us.ts';
+import { isValidRic } from '@/src/core/detect/rules/packs/cn.ts';
+import { isValidAadhaar } from '@/src/core/detect/rules/packs/in.ts';
+import { isValidNric } from '@/src/core/detect/rules/packs/sg.ts';
+import { isValidZaId } from '@/src/core/detect/rules/packs/za.ts';
 import {
   chineseIdValid,
   cpfValid,
@@ -141,6 +145,10 @@ const packValidators: Record<string, (value: string) => boolean> = {
   GB: isValidNino,
   CA: isValidSin,
   BR: isValidCpf,
+  IN: isValidAadhaar,
+  CN: (value) => isValidRic(value),
+  SG: isValidNric,
+  ZA: (value) => isValidZaId(value),
 };
 
 describe('identities against the country packs', () => {

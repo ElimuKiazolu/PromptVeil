@@ -102,6 +102,32 @@ function mainRegion(callingCode: string): CountryCode | null {
   return first === undefined ? null : toCountry(first as PhoneRegion);
 }
 
+/** Calling code per region, built on first use from the metadata. */
+let callingCodeByRegion: Map<string, string> | null = null;
+
+/**
+ * True when `country` shares a calling code with one of `regions` (NANP
+ * countries share +1, GB/GG/JE/IM share +44, RU/KZ share +7).
+ */
+export function sharesCallingCode(
+  country: CountryCode,
+  regions: readonly CountryCode[],
+): boolean {
+  if (callingCodeByRegion === null) {
+    callingCodeByRegion = new Map();
+    for (const [code, members] of Object.entries(
+      metadata.country_calling_codes,
+    )) {
+      for (const member of members) {
+        callingCodeByRegion.set(toCountry(member) ?? member, code);
+      }
+    }
+  }
+  const code = callingCodeByRegion.get(country);
+  if (code === undefined) return false;
+  return regions.some((region) => callingCodeByRegion?.get(region) === code);
+}
+
 function toCountry(region: PhoneRegion | undefined): CountryCode | null {
   if (region === undefined) return null;
   const alias = REGION_ALIASES[region];
@@ -160,12 +186,13 @@ const KNOWN_TYPES: ReadonlySet<PhoneType> = new Set<PhoneType>([
  * Orders the readings of a national number valid in several regions, most
  * likely first, deterministically:
  * 1. home regions, in their order;
- * 2. preferred (browser language) regions, in their order;
- * 3. regions that write the number with exactly the input's digit grouping
+ * 2. regions sharing a calling code with a home region (NANP for US or CA);
+ * 3. preferred (browser language) regions, in their order;
+ * 4. regions that write the number with exactly the input's digit grouping
  *    ("06 12 34 56 78" is how France writes it, not Afghanistan);
- * 4. the main region of the calling code (US for +1, GB for +44);
- * 5. a known number type (mobile or fixed line);
- * 6. alphabetical by region.
+ * 5. the main region of the calling code (US for +1, GB for +44);
+ * 6. a known number type (mobile or fixed line);
+ * 7. alphabetical by region.
  */
 function rankCandidates(
   candidates: readonly PhoneCandidate[],
@@ -183,6 +210,10 @@ function rankCandidates(
   };
   const key = (candidate: PhoneCandidate): number[] => [
     position(homeRegions, candidate.country),
+    candidate.country !== null &&
+    sharesCallingCode(candidate.country, homeRegions)
+      ? 0
+      : 1,
     position(preferredRegions, candidate.country),
     written !== null && groupLengths(candidate.nationalFormat) === written
       ? 0

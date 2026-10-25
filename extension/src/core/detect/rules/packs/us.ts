@@ -9,7 +9,7 @@
  * pamphlet). There is no check digit, so nine plain digits count only with
  * a context word nearby.
  */
-import { REFERENCE_BEFORE } from '../negative.ts';
+import { ID_REFERENCE_BEFORE } from '../negative.ts';
 import { INVALID, finding, type Rule } from '../types.ts';
 import { digitGroupScanner, groupedDigits } from './common.ts';
 import type { CountryPack } from './index.ts';
@@ -60,7 +60,7 @@ export const US_SSN_RULE: Rule = {
     after: 16,
   },
   contextRequired: false,
-  negativeContext: [REFERENCE_BEFORE],
+  negativeContext: [ID_REFERENCE_BEFORE],
   confidence: { validated: 0.95, context: 0.95, none: 0.85 },
 };
 

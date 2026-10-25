@@ -33,6 +33,7 @@ export type NationalIdSubtype =
   | 'CA_SIN'
   | 'BR_CPF'
   | 'IN_AADHAAR'
+  | 'IN_VID'
   | 'IN_PAN'
   | 'CN_RIC'
   | 'SG_NRIC'

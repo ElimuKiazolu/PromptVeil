@@ -12,8 +12,12 @@ import type { EntitySubtype } from '../../../../shared/entities.ts';
 import type { Rule } from '../types.ts';
 import { BR_PACK } from './br.ts';
 import { CA_PACK } from './ca.ts';
+import { CN_PACK } from './cn.ts';
 import { GB_PACK } from './gb.ts';
+import { IN_PACK } from './in.ts';
+import { SG_PACK } from './sg.ts';
 import { US_PACK } from './us.ts';
+import { ZA_PACK } from './za.ts';
 
 /** Check algorithms a stand-in generator may need to satisfy. */
 export type ChecksumKind =
@@ -82,11 +86,15 @@ export function enabledPacks(
 
 /**
  * Every country pack shipped, in tie-break order (TR-R3 falls back to rule
- * order). The remaining P0 packs follow in P3.2 and P3.3.
+ * order). The remaining P0 packs (ES, IT, FR, DE) follow in P3.3.
  */
 export const COUNTRY_PACKS: readonly CountryPack[] = [
   US_PACK,
   GB_PACK,
   CA_PACK,
   BR_PACK,
+  IN_PACK,
+  CN_PACK,
+  SG_PACK,
+  ZA_PACK,
 ];

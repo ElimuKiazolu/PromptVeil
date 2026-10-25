@@ -10,7 +10,7 @@
  * only with a context word nearby.
  */
 import { isValidLuhn, luhnCheckDigit } from '../../checksum.ts';
-import { REFERENCE_BEFORE } from '../negative.ts';
+import { ID_REFERENCE_BEFORE } from '../negative.ts';
 import { INVALID, finding, type Rule } from '../types.ts';
 import { digitGroupScanner, groupedDigits } from './common.ts';
 import type { CountryPack } from './index.ts';
@@ -58,7 +58,7 @@ export const CA_SIN_RULE: Rule = {
     after: 16,
   },
   contextRequired: false,
-  negativeContext: [REFERENCE_BEFORE],
+  negativeContext: [ID_REFERENCE_BEFORE],
   confidence: { validated: 1, context: 1, none: 1 },
 };
 

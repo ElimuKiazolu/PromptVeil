@@ -11,9 +11,12 @@
  * 5. Same text, several readings, of any type (two packs' 9-digit IDs, an
  *    NHS number or a phone number): TR-R3 picks one, preferring (0) a
  *    reading its validator is sure of, (1) one with a context word nearby,
- *    (2) a home region, (3) the strongest validation. If more than one is
- *    left and none is checksum-validated, the result is "possible". The other
- *    readings become alternatives (with their type).
+ *    (2) a home region (exact, else one sharing its calling code), (3) the
+ *    strongest validation. If more than one is left and none is
+ *    checksum-validated, the result is "possible", unless every reading is
+ *    personal data and one has a checksum or its own context word (masked
+ *    either way, see SENSITIVE_TYPES). The other readings become
+ *    alternatives (with their type).
  * 6. Overlaps: candidates are taken greedily in this order, skipping any that
  *    overlaps one already taken (spans are half-open, so neighbours that touch
  *    are both kept):
@@ -38,6 +41,7 @@ import {
   type EntityType,
 } from '../../../shared/entities.ts';
 import { blockingCheckpoint, type Checkpoint } from '../schedule.ts';
+import { sharesCallingCode } from '../validators/phone.ts';
 import { prepareText, type MatchText, type Span } from '../text.ts';
 import { hasContextWord } from './context.ts';
 import { GLOBAL_RULES } from './global.ts';
@@ -61,6 +65,14 @@ export interface DetectOptions {
   /** Where long work may yield; blocking when omitted. */
   readonly checkpoint?: Checkpoint;
 }
+
+/**
+ * Types that are personal data whatever their reading. DATE alone is not
+ * (a meeting date); everything else the rules detect is.
+ */
+const SENSITIVE_TYPES: ReadonlySet<EntityType> = new Set(
+  ENTITY_TYPES.filter((type) => type !== 'DATE'),
+);
 
 /** "possible" results never claim more than this. */
 const POSSIBLE_CONFIDENCE = 0.5;
@@ -133,12 +145,21 @@ function resolveReadings(
   if (sure.length > 0) pool = sure;
   const withContext = pool.filter((candidate) => candidate.hasContext);
   if (withContext.length > 0) pool = withContext;
+  // An exact home region first, then a region that shares a calling code
+  // with one (a NANP number for a Canadian user, a Jersey number for a
+  // British one).
   const home = pool.filter(
     (candidate) =>
       candidate.finding.country !== null &&
       homeRegions.includes(candidate.finding.country),
   );
+  const nearHome = pool.filter(
+    (candidate) =>
+      candidate.finding.country !== null &&
+      sharesCallingCode(candidate.finding.country, homeRegions),
+  );
   if (home.length > 0) pool = home;
+  else if (nearHome.length > 0) pool = nearHome;
   const best = Math.min(
     ...pool.map((candidate) => STRENGTH_RANK[candidate.finding.strength]),
   );
@@ -152,8 +173,19 @@ function resolveReadings(
   const primaryKey = readingKey(primary);
   const readings = new Set(pool.map(readingKey));
   const ambiguous = readings.size > 1;
+  // Ambiguity alone does not make a value "possible" when every reading is
+  // personal data and one of them is backed by a checksum or its own
+  // context word: it is masked either way, only its kind is uncertain.
+  const sensitiveEitherWay =
+    group.every((candidate) => SENSITIVE_TYPES.has(candidate.rule.type)) &&
+    group.some(
+      (candidate) =>
+        !candidate.finding.possible &&
+        (candidate.finding.strength === 'checksum' || candidate.hasContext),
+    );
   const possible =
-    primary.finding.possible || (ambiguous && best !== STRENGTH_RANK.checksum);
+    primary.finding.possible ||
+    (ambiguous && best !== STRENGTH_RANK.checksum && !sensitiveEitherWay);
 
   const seen = new Set([primaryKey]);
   const alternatives: DetectionAlternative[] = [];

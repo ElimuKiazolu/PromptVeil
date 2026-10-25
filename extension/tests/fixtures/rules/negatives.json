@@ -31,6 +31,9 @@
     "Account number 9990000018 and booking ref 999 000 0018.",
     "Ticket AB123456C was closed; part numbers ab123456c and XY-123456-A.",
     "Unix times: \"created_at\": 1697712345, \"exp\": 1735689600000, ts=1700000000.",
-    "Serial 0000000000, test value 111.111.111-11 and 000-00-0000."
+    "Serial 0000000000, test value 111.111.111-11 and 000-00-0000.",
+    "Order ACUPA7085R and SKU AAPPV8261K shipped; ticket S1234567D closed.",
+    "Invoice 7503305044089, receipt 360426199101010071, booking ref 999941057058.",
+    "Product codes acupa7085r and M1134985k are lower case; serial 2341234123412341."
   ]
 }

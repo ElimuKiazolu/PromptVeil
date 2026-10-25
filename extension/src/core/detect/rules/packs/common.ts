@@ -58,3 +58,28 @@ export function groupedDigits(
 export function isRepeatedDigit(digits: string): boolean {
   return /^(\d)\1*$/u.test(digits);
 }
+
+/** True for a real calendar date (proleptic Gregorian, years 1–9999). */
+export function isCalendarDate(
+  year: number,
+  month: number,
+  day: number,
+): boolean {
+  if (!Number.isInteger(year) || month < 1 || month > 12 || day < 1)
+    return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+/** True when the date is not after `today` (UTC calendar days). */
+export function isNotFuture(
+  year: number,
+  month: number,
+  day: number,
+  today: Date,
+): boolean {
+  return (
+    Date.UTC(year, month - 1, day) <=
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+  );
+}

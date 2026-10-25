@@ -14,7 +14,7 @@
  * passes the check).
  */
 import { weightedMod11 } from '../../checksum.ts';
-import { REFERENCE_BEFORE } from '../negative.ts';
+import { ID_REFERENCE_BEFORE } from '../negative.ts';
 import type { Span } from '../../text.ts';
 import { INVALID, finding, type Rule } from '../types.ts';
 import { digitGroupScanner, groupedDigits, isRepeatedDigit } from './common.ts';
@@ -80,7 +80,7 @@ export const UK_NINO_RULE: Rule = {
     after: 16,
   },
   contextRequired: false,
-  negativeContext: [REFERENCE_BEFORE],
+  negativeContext: [ID_REFERENCE_BEFORE],
   confidence: { validated: 0.95, context: 0.95, none: 0.85 },
 };
 
@@ -120,7 +120,7 @@ export const UK_NHS_RULE: Rule = {
     after: 16,
   },
   contextRequired: false,
-  negativeContext: [REFERENCE_BEFORE],
+  negativeContext: [ID_REFERENCE_BEFORE],
   confidence: { validated: 1, context: 1, none: 1 },
 };
 

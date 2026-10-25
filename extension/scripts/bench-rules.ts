@@ -32,6 +32,7 @@ import {
   COUNTRY_PACKS,
   type CountryPack,
 } from '../src/core/detect/rules/packs/index.ts';
+import { IN_PACK, isValidPan } from '../src/core/detect/rules/packs/in.ts';
 import { createCheckpoint, type Yielder } from '../src/core/detect/schedule.ts';
 import {
   clearPhoneCache,
@@ -100,6 +101,8 @@ const TYPICAL: Record<string, string> = {
     'My SSN is 536-90-4399 and my NI number AB 12 34 56 C.',
     'NHS number 999 000 0018, SIN 123 456 782.',
     'CPF 390.533.447-05, ticket 48213907, invoice 2024001234.',
+    'Aadhaar 9999 4105 7058, PAN ACUPA7085R, 身份证 11010519491231002X.',
+    'NRIC S1234567D, FIN M1134985K, ID number 7503305044089.',
   ]),
   'plain prose': prompt(1, []),
   'mixed entities': prompt(2, [
@@ -316,6 +319,52 @@ function secretRates(
   );
 }
 
+/**
+ * PAN has no published checksum, so its shape and holder letter are all
+ * that separate it from other upper-case codes.
+ */
+async function panFalsePositives(ids: readonly string[]): Promise<void> {
+  const panOnly = {
+    homeRegions: HOME,
+    entityTypes: new Set<EntityType>(['NATIONAL_ID']),
+    packs: [IN_PACK],
+    exclude: [],
+  };
+  let found = 0;
+  for (let i = 0; i < ids.length; i += 500) {
+    const detections = await detectRules(
+      ids.slice(i, i + 500).join(' '),
+      panOnly,
+    );
+    found += detections.filter((d) => d.subtype === 'IN_PAN').length;
+  }
+  console.log(
+    `  word-built identifiers: ${found.toString()} of ${ids.length.toString()} detected as PAN`,
+  );
+  const next = random(4242);
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const alphanumeric = `${letters}0123456789`;
+  const pick = (alphabet: string): string =>
+    alphabet.charAt(Math.floor(next() * alphabet.length));
+  const total = 50_000;
+  let anyCode = 0;
+  let panShaped = 0;
+  for (let i = 0; i < total; i += 1) {
+    let code = '';
+    for (let k = 0; k < 10; k += 1) code += pick(alphanumeric);
+    if (isValidPan(code)) anyCode += 1;
+    let shaped = '';
+    for (let k = 0; k < 5; k += 1) shaped += pick(letters);
+    shaped += `${Math.floor(next() * 10_000)
+      .toString()
+      .padStart(4, '0')}${pick(letters)}`;
+    if (isValidPan(shaped)) panShaped += 1;
+  }
+  console.log(
+    `  random 10-character upper-case codes: ${((100 * anyCode) / total).toFixed(2)} % pass; codes already shaped AAAAA9999A: ${((100 * panShaped) / total).toFixed(1)} % pass`,
+  );
+}
+
 function equivalence(): void {
   const corpus = new Set<string>();
   for (const [region, nationalNumber] of Object.entries(
@@ -434,6 +483,9 @@ async function main(): Promise<void> {
       `    first sight, time-sliced: ${fmt(sliced.total)} in ${sliced.tasks.toString()} tasks, longest task ${fmt(sliced.longest)}`,
     );
   }
+
+  console.log('\nIN_PAN without a context word (no checksum):');
+  await panFalsePositives(identifiers());
 
   console.log('\nSECRET generic rule thresholds:');
   const ids = identifiers();

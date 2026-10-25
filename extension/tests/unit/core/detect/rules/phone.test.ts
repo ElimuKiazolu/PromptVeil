@@ -6,6 +6,7 @@ import {
   isTimestamp,
 } from '@/src/core/detect/rules/phone.ts';
 import { blockingCheckpoint } from '@/src/core/detect/schedule.ts';
+import { sharesCallingCode } from '@/src/core/detect/validators/phone.ts';
 import type { CountryCode } from '@/src/shared/country.ts';
 
 const candidates = (text: string): string[] =>
@@ -216,5 +217,22 @@ describe('timestamps are not phone numbers', () => {
     expect(isTimestamp('call 1700000000 now', { start: 5, end: 15 })).toBe(
       false,
     );
+  });
+});
+
+describe('shared calling codes', () => {
+  it('treats regions of one calling code as near each other', () => {
+    expect(sharesCallingCode('US', ['CA'])).toBe(true);
+    expect(sharesCallingCode('JM', ['US'])).toBe(true);
+    expect(sharesCallingCode('JE', ['GB'])).toBe(true);
+    expect(sharesCallingCode('KZ', ['RU'])).toBe(true);
+    expect(sharesCallingCode('FR', ['GB', 'US'])).toBe(false);
+    expect(sharesCallingCode('US', [])).toBe(false);
+  });
+
+  it('ranks a reading from a region sharing the home calling code first', async () => {
+    // libphonenumber's example US number, read with home CA: US (+1) is near home.
+    const verdict = await PHONE_RULE.validate('201 555 0123', env(['CA']));
+    expect(verdict.valid && verdict.country).toBe('US');
   });
 });

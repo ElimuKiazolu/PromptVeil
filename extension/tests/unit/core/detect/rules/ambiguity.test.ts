@@ -12,6 +12,15 @@ import type { CountryCode } from '@/src/shared/country.ts';
 import type { EntityType } from '@/src/shared/entities.ts';
 import { detectRules } from '@/src/core/detect/rules/detector.ts';
 import { COUNTRY_PACKS } from '@/src/core/detect/rules/packs/index.ts';
+import { isValidRic } from '@/src/core/detect/rules/packs/cn.ts';
+import { isValidAadhaar } from '@/src/core/detect/rules/packs/in.ts';
+import { isValidZaId } from '@/src/core/detect/rules/packs/za.ts';
+import {
+  luhnCheckDigit,
+  mod11_2CheckCharacter,
+} from '@/src/core/detect/checksum.ts';
+import { validateCard } from '@/src/core/detect/validators/card.ts';
+import { validatePhone } from '@/src/core/detect/validators/phone.ts';
 
 const ALL = new Set<EntityType>([
   'EMAIL',
@@ -28,6 +37,9 @@ const HOMES: Record<string, CountryCode[]> = {
   CA: ['CA'],
   BR: ['BR'],
   IN: ['IN'],
+  CN: ['CN'],
+  SG: ['SG'],
+  ZA: ['ZA'],
   none: [],
 };
 
@@ -38,7 +50,8 @@ const CASES: {
   name: string;
   text: string;
   value: string;
-  expected: Record<keyof typeof HOMES, Reading>;
+  /** Per home set; homes not listed expect the "none" result. */
+  expected: Partial<Record<keyof typeof HOMES, Reading>> & { none: Reading };
 }[] = [
   {
     name: '9 digits: US_SSN vs CA_SIN vs PHONE, both ID words present',
@@ -68,25 +81,31 @@ const CASES: {
   },
   {
     // 536-90-4399 is the python-stdnum us.ssn example (Luhn-invalid, so no SIN).
-    name: '9 digits: US_SSN vs PHONE, both words, no checksum: possible unless home decides',
+    // Both readings are personal data and have their own context word:
+    // masked either way (sensitive-either-way rule); the order picks the kind.
+    // Home CA counts the US reading as home (shared +1 calling code).
+    name: '9 digits: US_SSN vs PHONE, both words, no checksum: confirmed either way',
     text: 'SSN or phone: 536904399',
     value: '536904399',
     expected: {
       US: 'NATIONAL_ID/US_SSN confirmed',
-      CA: 'PHONE/- possible',
-      GB: 'PHONE/- possible',
-      BR: 'PHONE/- possible',
-      IN: 'PHONE/- possible',
-      none: 'PHONE/- possible',
+      CA: 'NATIONAL_ID/US_SSN confirmed',
+      GB: 'PHONE/- confirmed',
+      BR: 'PHONE/- confirmed',
+      IN: 'PHONE/- confirmed',
+      none: 'PHONE/- confirmed',
     },
   },
   {
+    // A NANP number is near-home for CA (shared +1).
     name: '10 digits: UK_NHS vs PHONE, no context word',
     text: 'Number: 201 555 0143.',
     value: '201 555 0143',
     expected: {
       US: 'PHONE/- confirmed',
-      CA: 'NATIONAL_ID/UK_NHS confirmed',
+      CA: 'PHONE/- confirmed',
+      // Also a valid Chinese landline (area code 20) when CN is home.
+      CN: 'PHONE/- confirmed',
       GB: 'NATIONAL_ID/UK_NHS confirmed',
       BR: 'NATIONAL_ID/UK_NHS confirmed',
       IN: 'NATIONAL_ID/UK_NHS confirmed',
@@ -162,9 +181,148 @@ describe('cross-pack and cross-type ambiguity (TR-R3)', () => {
         expect(detection?.value).toBe(testCase.value);
         expect(
           `${detection?.type ?? ''}/${detection?.subtype ?? '-'} ${detection?.status ?? ''}`,
-        ).toBe(testCase.expected[home]);
+        ).toBe(testCase.expected[home] ?? testCase.expected.none);
         // The losing readings are kept as alternatives, with their type.
         expect(detection?.alternatives.length).toBeGreaterThan(0);
+      });
+    });
+  }
+});
+
+/** Fixed linear congruential sequence: the same numbers on every run. */
+function seeded(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1103515245 + 12345) % 2147483648;
+    return state / 2147483648;
+  };
+}
+
+function digitsFrom(next: () => number, count: number): string {
+  let out = '';
+  for (let i = 0; i < count; i += 1) out += Math.floor(next() * 10).toString();
+  return out;
+}
+
+/** The first generated value (in memory only) that satisfies `accept`. */
+function firstGenerated(
+  seed: number,
+  make: (next: () => number) => string,
+  accept: (value: string) => boolean,
+): string {
+  const next = seeded(seed);
+  for (let tries = 0; tries < 200_000; tries += 1) {
+    const value = make(next);
+    if (accept(value)) return value;
+  }
+  throw new Error('no value found');
+}
+
+const group4 = (digits: string): string =>
+  digits.replace(/(\d{4})(?=\d)/gu, '$1 ');
+
+/**
+ * Values that read validly as two kinds at once, generated at test time
+ * (test-data policy: never written to the repository).
+ */
+const indianNumber = firstGenerated(
+  701,
+  (next) => `919${digitsFrom(next, 9)}`,
+  (value) => {
+    if (!isValidAadhaar(value)) return false;
+    const phone = validatePhone(value, ['IN']);
+    return phone.valid && phone.fromHomeRegions;
+  },
+);
+const zaAndCard = firstGenerated(
+  702,
+  (next) => {
+    const payload = `4${digitsFrom(next, 1)}0${(1 + Math.floor(next() * 9)).toString()}1${digitsFrom(next, 1)}${digitsFrom(next, 4)}0${digitsFrom(next, 1)}`;
+    return `${payload}${String(luhnCheckDigit(payload))}`;
+  },
+  (value) => isValidZaId(value) && validateCard(value).valid,
+);
+const ricAndCard = firstGenerated(
+  703,
+  (next) => {
+    const payload = `620102198${digitsFrom(next, 1)}0${(1 + Math.floor(next() * 9)).toString()}1${digitsFrom(next, 1)}${digitsFrom(next, 3)}`;
+    return `${payload}${mod11_2CheckCharacter(payload) ?? ''}`;
+  },
+  (value) => isValidRic(value) && validateCard(value).valid,
+);
+
+const GENERATED: {
+  name: string;
+  text: string;
+  value: string;
+  expected: Partial<Record<keyof typeof HOMES, Reading>> & { none: Reading };
+  /** Only one reading survives (the other needs a context word). */
+  single?: boolean;
+}[] = [
+  {
+    name: '12 digits: IN_AADHAAR vs an Indian phone written 91 + mobile, Aadhaar word',
+    text: `Aadhaar ${indianNumber}`,
+    value: indianNumber,
+    expected: { none: 'NATIONAL_ID/IN_AADHAAR confirmed' },
+  },
+  {
+    name: '12 digits: the same run with a phone word (plain Aadhaar needs its own word)',
+    text: `call ${indianNumber}`,
+    value: indianNumber,
+    expected: { none: 'PHONE/- confirmed' },
+    single: true,
+  },
+  {
+    name: '12 digits written 4-4-4, no word: the Aadhaar checksum wins',
+    text: `Number: ${group4(indianNumber)}`,
+    value: group4(indianNumber),
+    expected: { none: 'NATIONAL_ID/IN_AADHAAR confirmed' },
+  },
+  {
+    name: '13 digits: ZA_ID vs a 13-digit Visa number, no word',
+    text: `Number: ${zaAndCard}`,
+    value: zaAndCard,
+    expected: { ZA: 'NATIONAL_ID/ZA_ID confirmed', none: 'CARD/- confirmed' },
+  },
+  {
+    name: '13 digits with an ID word',
+    text: `ID number ${zaAndCard}`,
+    value: zaAndCard,
+    expected: { none: 'NATIONAL_ID/ZA_ID confirmed' },
+  },
+  {
+    name: '18 digits: CN_RIC vs an 18-digit card number, no word',
+    text: `Number: ${ricAndCard}`,
+    value: ricAndCard,
+    expected: { CN: 'NATIONAL_ID/CN_RIC confirmed', none: 'CARD/- confirmed' },
+  },
+  {
+    name: '18 digits with an ID card word',
+    text: `身份证号 ${ricAndCard}`,
+    value: ricAndCard,
+    expected: { none: 'NATIONAL_ID/CN_RIC confirmed' },
+  },
+];
+
+describe('ambiguity with the IN, CN, SG and ZA packs (generated values)', () => {
+  for (const testCase of GENERATED) {
+    describe(testCase.name, () => {
+      it.each(Object.keys(HOMES))('home %s', async (home) => {
+        const detections = await detectRules(testCase.text, {
+          homeRegions: HOMES[home] ?? [],
+          entityTypes: ALL,
+          packs: COUNTRY_PACKS,
+          exclude: [],
+        });
+        expect(detections).toHaveLength(1);
+        const [detection] = detections;
+        expect(detection?.value).toBe(testCase.value);
+        expect(
+          `${detection?.type ?? ''}/${detection?.subtype ?? '-'} ${detection?.status ?? ''}`,
+        ).toBe(testCase.expected[home] ?? testCase.expected.none);
+        if (testCase.single !== true) {
+          expect(detection?.alternatives.length).toBeGreaterThan(0);
+        }
       });
     });
   }

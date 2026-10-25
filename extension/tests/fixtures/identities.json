@@ -71,7 +71,7 @@
     "validExample": {
       "type": "Aadhaar",
       "value": "999999990019",
-      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
+      "source": "Same as nationalId, a published checksum-valid example; detected by the IN pack."
     }
   },
   {
@@ -171,7 +171,7 @@
     "validExample": {
       "type": "ID",
       "value": "9807055009087",
-      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
+      "source": "Same as nationalId, a published checksum-valid example; detected by the ZA pack."
     }
   },
   {
@@ -196,7 +196,7 @@
     "validExample": {
       "type": "NRIC",
       "value": "S1234567D",
-      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
+      "source": "Same as nationalId, a published checksum-valid example; detected by the SG pack."
     }
   },
   {
@@ -221,7 +221,7 @@
     "validExample": {
       "type": "Resident ID",
       "value": "11010519491231002X",
-      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
+      "source": "Same as nationalId, a published checksum-valid example; detected by the CN pack."
     }
   },
   {
