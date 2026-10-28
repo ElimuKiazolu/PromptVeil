@@ -357,7 +357,9 @@ describe('startRestorer', () => {
     expect(lookups).toBeLessThanOrEqual(400);
     // A gross backstop only; jsdom under load is far slower than Chrome.
     expect(performance.now() - startedAt).toBeLessThan(15_000);
-  });
+    // jsdom needs 4–5 s for this on the target laptop, close to the default
+    // 5 s limit; the test's own limits are the lookup count and the backstop.
+  }, 20_000);
 
   it('leaves the edit-message box alone', async () => {
     load(`${fixture('conversation.html')}${fixture('edit-box.html')}`);

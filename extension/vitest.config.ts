@@ -28,6 +28,8 @@ export default defineConfig({
         test: {
           name: 'dom',
           environment: 'jsdom',
+          // Loads jsdom once before the workers start (see the file).
+          globalSetup: ['tests/setup/jsdom-warm-up.ts'],
           include: ['tests/unit/{ui,content,adapters}/**/*.test.{ts,tsx}'],
         },
       },

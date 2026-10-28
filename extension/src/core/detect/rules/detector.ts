@@ -42,6 +42,7 @@ import {
 } from '../../../shared/entities.ts';
 import { blockingCheckpoint, type Checkpoint } from '../schedule.ts';
 import { sharesCallingCode } from '../validators/phone.ts';
+import { isPermissivePhoneCell } from '../validators/phone-shares.ts';
 import { prepareText, type MatchText, type Span } from '../text.ts';
 import { hasContextWord } from './context.ts';
 import { GLOBAL_RULES } from './global.ts';
@@ -105,6 +106,8 @@ interface Candidate {
   match: Span;
   /** Span in the original text. */
   span: Span;
+  /** The candidate's text as matched (normalised). */
+  value: string;
   hasContext: boolean;
   finding: Finding;
 }
@@ -130,6 +133,15 @@ function confidenceOf(candidate: Candidate, possible: boolean): number {
   return possible ? Math.min(value, POSSIBLE_CONFIDENCE) : value;
 }
 
+/** A national-format phone reading whose region/length cell is permissive. */
+function isUninformativePhone(candidate: Candidate): boolean {
+  const { country } = candidate.finding;
+  if (candidate.rule.type !== 'PHONE' || country === null) return false;
+  if (candidate.value.trimStart().startsWith('+')) return false;
+  const digits = candidate.value.replace(/\D/gu, '').length;
+  return isPermissivePhoneCell(country, digits);
+}
+
 function readingKey(candidate: Candidate): string {
   return `${candidate.rule.type}|${candidate.finding.subtype ?? ''}|${candidate.finding.country ?? ''}`;
 }
@@ -145,6 +157,22 @@ function resolveReadings(
   if (sure.length > 0) pool = sure;
   const withContext = pool.filter((candidate) => candidate.hasContext);
   if (withContext.length > 0) pool = withContext;
+  // A national phone reading in a permissive cell (most random digit runs
+  // of that length are valid numbers there, e.g. Germany) proves little:
+  // a checksum-validated reading beats it, home region or not. Neither may
+  // have a context word here (context was decided above).
+  if (
+    pool.some(
+      (candidate) =>
+        candidate.rule.type !== 'PHONE' &&
+        candidate.finding.strength === 'checksum',
+    )
+  ) {
+    const informative = pool.filter(
+      (candidate) => !isUninformativePhone(candidate),
+    );
+    if (informative.length > 0) pool = informative;
+  }
   // An exact home region first, then a region that shares a calling code
   // with one (a NANP number for a Canadian user, a Jersey number for a
   // British one).
@@ -289,21 +317,20 @@ async function collectCandidates(
       ) {
         continue;
       }
-      const verdict = await rule.validate(
-        text.text.slice(match.start, match.end),
-        {
-          homeRegions: options.homeRegions,
-          preferredRegions: options.preferredRegions ?? [],
-          hasContext,
-          checkpoint,
-        },
-      );
+      const value = text.text.slice(match.start, match.end);
+      const verdict = await rule.validate(value, {
+        homeRegions: options.homeRegions,
+        preferredRegions: options.preferredRegions ?? [],
+        hasContext,
+        checkpoint,
+      });
       if (!verdict.valid) continue;
       candidates.push({
         rule,
         ruleIndex,
         match,
         span,
+        value,
         hasContext,
         finding: verdict,
       });

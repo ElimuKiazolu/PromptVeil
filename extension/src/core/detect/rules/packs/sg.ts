@@ -10,8 +10,9 @@
  * tables are the long-established ones (Ngiam Shih Tung's analysis), the M
  * offset is documented by SAP note 2572734, and the M table (with the index
  * reversed) follows the singapore-nric library. ICA's illustrative example
- * M1234567B does not pass it (nor any other table); no published M number
- * that should pass is known.
+ * M1234567B does not pass it (nor any other table). Because the M table is
+ * unofficial, an M FIN that fails it is still reported as "possible" when an
+ * NRIC/FIN word is nearby.
  */
 import { ID_REFERENCE_BEFORE } from '../negative.ts';
 import type { Span } from '../../text.ts';
@@ -58,8 +59,15 @@ export const SG_NRIC_RULE: Rule = {
   subtype: 'SG_NRIC',
   country: 'SG',
   find: findNrics,
-  validate: (value) =>
-    isValidNric(value) ? finding(SG_NRIC_RULE, 'checksum') : INVALID,
+  validate(value, env) {
+    if (isValidNric(value)) return finding(SG_NRIC_RULE, 'checksum');
+    // The M-series letter table is not official: an M FIN that fails it but
+    // has an NRIC/FIN word nearby is offered for review, never dropped.
+    if (env.hasContext && /^M\d{7}[A-Z]$/u.test(value)) {
+      return finding(SG_NRIC_RULE, 'none', { possible: true });
+    }
+    return INVALID;
+  },
   context: {
     words: [
       'nric',

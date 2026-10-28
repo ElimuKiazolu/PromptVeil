@@ -13,10 +13,14 @@ import type { EntityType } from '@/src/shared/entities.ts';
 import { detectRules } from '@/src/core/detect/rules/detector.ts';
 import { COUNTRY_PACKS } from '@/src/core/detect/rules/packs/index.ts';
 import { isValidRic } from '@/src/core/detect/rules/packs/cn.ts';
+import { isValidCpf } from '@/src/core/detect/rules/packs/br.ts';
+import { isValidTaxId } from '@/src/core/detect/rules/packs/de.ts';
+import { isValidNir } from '@/src/core/detect/rules/packs/fr.ts';
 import { isValidAadhaar } from '@/src/core/detect/rules/packs/in.ts';
 import { isValidZaId } from '@/src/core/detect/rules/packs/za.ts';
 import {
   luhnCheckDigit,
+  mod11_10CheckDigit,
   mod11_2CheckCharacter,
 } from '@/src/core/detect/checksum.ts';
 import { validateCard } from '@/src/core/detect/validators/card.ts';
@@ -40,6 +44,10 @@ const HOMES: Record<string, CountryCode[]> = {
   CN: ['CN'],
   SG: ['SG'],
   ZA: ['ZA'],
+  ES: ['ES'],
+  IT: ['IT'],
+  FR: ['FR'],
+  DE: ['DE'],
   none: [],
 };
 
@@ -143,6 +151,8 @@ const CASES: {
     text: 'Documento 39053344705',
     value: '39053344705',
     expected: {
+      // An Italian mobile number (3xx) with home IT; Italy's cells are not permissive.
+      IT: 'PHONE/- confirmed',
       US: 'NATIONAL_ID/BR_CPF confirmed',
       CA: 'NATIONAL_ID/BR_CPF confirmed',
       GB: 'NATIONAL_ID/BR_CPF confirmed',
@@ -251,6 +261,26 @@ const ricAndCard = firstGenerated(
   (value) => isValidRic(value) && validateCard(value).valid,
 );
 
+const taxIdAndCpf = firstGenerated(
+  704,
+  (next) => {
+    const pool = '0123456789'.split('').sort(() => next() - 0.5);
+    const digits = pool.slice(0, 9);
+    digits.push(digits[Math.floor(next() * 9)] ?? '1');
+    const first10 = digits.sort(() => next() - 0.5).join('');
+    return `${first10}${String(mod11_10CheckDigit(first10))}`;
+  },
+  (value) => isValidTaxId(value) && isValidCpf(value),
+);
+const nirAndAmex = firstGenerated(
+  705,
+  (next) => {
+    const payload = `37${digitsFrom(next, 1)}0${(1 + Math.floor(next() * 9)).toString()}${(1 + Math.floor(next() * 9)).toString().padStart(2, '0')}${digitsFrom(next, 7)}`;
+    return `${payload}${String(luhnCheckDigit(payload))}`;
+  },
+  (value) => isValidNir(value) && validateCard(value).valid,
+);
+
 const GENERATED: {
   name: string;
   text: string;
@@ -276,13 +306,18 @@ const GENERATED: {
     name: '12 digits written 4-4-4, no word: the Aadhaar checksum wins',
     text: `Number: ${group4(indianNumber)}`,
     value: group4(indianNumber),
-    expected: { none: 'NATIONAL_ID/IN_AADHAAR confirmed' },
+    expected: {
+      none: 'NATIONAL_ID/IN_AADHAAR confirmed',
+    },
   },
   {
     name: '13 digits: ZA_ID vs a 13-digit Visa number, no word',
     text: `Number: ${zaAndCard}`,
     value: zaAndCard,
-    expected: { ZA: 'NATIONAL_ID/ZA_ID confirmed', none: 'CARD/- confirmed' },
+    expected: {
+      ZA: 'NATIONAL_ID/ZA_ID confirmed',
+      none: 'CARD/- confirmed',
+    },
   },
   {
     name: '13 digits with an ID word',
@@ -301,6 +336,48 @@ const GENERATED: {
     text: `身份证号 ${ricAndCard}`,
     value: ricAndCard,
     expected: { none: 'NATIONAL_ID/CN_RIC confirmed' },
+  },
+  {
+    name: '11 digits: DE_TAXID vs BR_CPF (and PHONE), no word',
+    text: `Number: ${taxIdAndCpf}`,
+    value: taxIdAndCpf,
+    expected: {
+      DE: 'NATIONAL_ID/DE_TAXID confirmed',
+      none: 'NATIONAL_ID/BR_CPF confirmed',
+    },
+  },
+  {
+    name: '11 digits with a Steuer-ID word',
+    text: `Steuer-ID ${taxIdAndCpf}`,
+    value: taxIdAndCpf,
+    expected: { none: 'NATIONAL_ID/DE_TAXID confirmed' },
+  },
+  {
+    name: '11 digits with a CPF word',
+    text: `CPF ${taxIdAndCpf}`,
+    value: taxIdAndCpf,
+    expected: { none: 'NATIONAL_ID/BR_CPF confirmed' },
+  },
+  {
+    name: '15 digits: FR_NIR vs an Amex-shaped card number, no word',
+    text: `Number: ${nirAndAmex}`,
+    value: nirAndAmex,
+    expected: {
+      FR: 'NATIONAL_ID/FR_NIR confirmed',
+      none: 'CARD/- confirmed',
+    },
+  },
+  {
+    name: '15 digits with a social security word',
+    text: `Numéro de sécurité sociale ${nirAndAmex}`,
+    value: nirAndAmex,
+    expected: { none: 'NATIONAL_ID/FR_NIR confirmed' },
+  },
+  {
+    name: '15 digits with a card word',
+    text: `card number ${nirAndAmex}`,
+    value: nirAndAmex,
+    expected: { none: 'CARD/- confirmed' },
   },
 ];
 

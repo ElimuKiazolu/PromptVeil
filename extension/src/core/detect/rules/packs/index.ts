@@ -13,8 +13,12 @@ import type { Rule } from '../types.ts';
 import { BR_PACK } from './br.ts';
 import { CA_PACK } from './ca.ts';
 import { CN_PACK } from './cn.ts';
+import { DE_PACK } from './de.ts';
+import { ES_PACK } from './es.ts';
+import { FR_PACK } from './fr.ts';
 import { GB_PACK } from './gb.ts';
 import { IN_PACK } from './in.ts';
+import { IT_PACK } from './it.ts';
 import { SG_PACK } from './sg.ts';
 import { US_PACK } from './us.ts';
 import { ZA_PACK } from './za.ts';
@@ -86,7 +90,7 @@ export function enabledPacks(
 
 /**
  * Every country pack shipped, in tie-break order (TR-R3 falls back to rule
- * order). The remaining P0 packs (ES, IT, FR, DE) follow in P3.3.
+ * order). These are the 12 P0 packs of TR §4.2.
  */
 export const COUNTRY_PACKS: readonly CountryPack[] = [
   US_PACK,
@@ -97,4 +101,8 @@ export const COUNTRY_PACKS: readonly CountryPack[] = [
   CN_PACK,
   SG_PACK,
   ZA_PACK,
+  ES_PACK,
+  IT_PACK,
+  FR_PACK,
+  DE_PACK,
 ];

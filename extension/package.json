@@ -24,7 +24,8 @@
     "models:fetch": "node scripts/fetch-models.ts",
     "bench:build": "wxt build --mode bench",
     "bench:build:nocoi": "wxt build --mode bench-nocoi",
-    "bench:rules": "node scripts/bench-rules.ts"
+    "bench:rules": "node scripts/bench-rules.ts",
+    "generate:phone-shares": "node scripts/generate-phone-shares.ts && prettier --write src/core/detect/validators/phone-shares.generated.ts"
   },
   "dependencies": {
     "@fontsource/instrument-sans": "5.3.0",

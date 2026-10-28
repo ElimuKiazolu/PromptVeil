@@ -103,6 +103,7 @@ const TYPICAL: Record<string, string> = {
     'CPF 390.533.447-05, ticket 48213907, invoice 2024001234.',
     'Aadhaar 9999 4105 7058, PAN ACUPA7085R, 身份证 11010519491231002X.',
     'NRIC S1234567D, FIN M1134985K, ID number 7503305044089.',
+    'DNI 12345678-Z, codice fiscale RCCMNL83S18D969H, NIR 1 84 12 76 451 089 46, Steuer-ID 36 574 261 809.',
   ]),
   'plain prose': prompt(1, []),
   'mixed entities': prompt(2, [
@@ -464,7 +465,7 @@ async function main(): Promise<void> {
     console.log(`  ${name.padEnd(16)} ${costs.join(' | ')}`);
   }
   console.log(
-    `  headroom at p95 with every rule and these ${COUNTRY_PACKS.length.toString()} packs: ${fmt(BUDGET_MS - allP95)}, ${fmt((BUDGET_MS - allP95) / (12 - COUNTRY_PACKS.length))} for each of the ${(12 - COUNTRY_PACKS.length).toString()} packs still to come`,
+    `  headroom at p95 with every rule and these ${COUNTRY_PACKS.length.toString()} packs: ${fmt(BUDGET_MS - allP95)} of the ${BUDGET_MS.toString()} ms budget`,
   );
 
   console.log('\nWorst case: national numbers no home region accepts');

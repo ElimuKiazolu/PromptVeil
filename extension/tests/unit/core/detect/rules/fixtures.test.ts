@@ -70,6 +70,10 @@ describe('negative fixtures', () => {
       ['CN'],
       ['SG'],
       ['ZA'],
+      ['ES'],
+      ['IT'],
+      ['FR'],
+      ['DE'],
     ] as const) {
       const detections = await detectRules(text, {
         homeRegions: regions(homeRegions),

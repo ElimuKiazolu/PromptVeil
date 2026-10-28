@@ -121,7 +121,7 @@
     "validExample": {
       "type": "Steuer-ID",
       "value": "65929970489",
-      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
+      "source": "Same as nationalId, a published checksum-valid example; detected by the DE pack."
     }
   },
   {
@@ -146,7 +146,7 @@
     "validExample": {
       "type": "NIR",
       "value": "2 91 01 75 018 002 68",
-      "source": "Same as nationalId, a published checksum-valid example; detectable once this country's pack exists."
+      "source": "Same as nationalId, a published checksum-valid example; detected by the FR pack."
     }
   },
   {

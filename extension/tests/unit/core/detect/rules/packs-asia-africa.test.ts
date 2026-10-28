@@ -406,3 +406,25 @@ describe('ZA_ID', () => {
     }
   });
 });
+
+describe('SG_NRIC: the unofficial M-series table', () => {
+  it('reports an M FIN that fails the table as possible when an NRIC/FIN word is near', async () => {
+    // singapore-nric test suite: M1134985A is the M1134985K number with a
+    // letter the table rejects.
+    expect(await detectIds('FIN M1134985A')).toEqual([
+      ['SG_NRIC', 'M1134985A', 'possible'],
+    ]);
+    expect(await detectIds('IC no. M1134985A')).toEqual([
+      ['SG_NRIC', 'M1134985A', 'possible'],
+    ]);
+  });
+
+  it('keeps a passing M FIN confirmed and drops a failing one without a word', async () => {
+    expect(await detectIds('FIN M1134985K')).toEqual([
+      ['SG_NRIC', 'M1134985K', 'confirmed'],
+    ]);
+    expect(await detectIds('code M1134985A')).toEqual([]);
+    // Only the M series has the fallback.
+    expect(await detectIds('FIN F8234009A')).toEqual([]);
+  });
+});
