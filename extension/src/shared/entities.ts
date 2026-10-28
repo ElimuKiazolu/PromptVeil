@@ -25,29 +25,51 @@ export const ENTITY_TYPES = [
 
 export type EntityType = (typeof ENTITY_TYPES)[number];
 
-/** Country ID formats (P0). Country formats are subtypes, never new entity types. */
-export type NationalIdSubtype =
-  | 'US_SSN'
-  | 'UK_NINO'
-  | 'UK_NHS'
-  | 'CA_SIN'
-  | 'BR_CPF'
-  | 'IN_AADHAAR'
-  | 'IN_VID'
-  | 'IN_PAN'
-  | 'CN_RIC'
-  | 'SG_NRIC'
-  | 'ZA_ID'
-  | 'ES_DNI'
-  | 'IT_CF'
-  | 'FR_NIR'
-  | 'DE_TAXID';
+export function isEntityType(value: unknown): value is EntityType {
+  return (ENTITY_TYPES as readonly unknown[]).includes(value);
+}
 
-export type BankSubtype =
-  'IBAN' | 'SWIFT_BIC' | 'US_ABA' | 'UK_SORTCODE' | 'IN_IFSC' | 'IN_UPI';
+/** Country ID formats (P0). Country formats are subtypes, never new entity types. */
+export const NATIONAL_ID_SUBTYPES = [
+  'US_SSN',
+  'UK_NINO',
+  'UK_NHS',
+  'CA_SIN',
+  'BR_CPF',
+  'IN_AADHAAR',
+  'IN_VID',
+  'IN_PAN',
+  'CN_RIC',
+  'SG_NRIC',
+  'ZA_ID',
+  'ES_DNI',
+  'IT_CF',
+  'FR_NIR',
+  'DE_TAXID',
+] as const;
+
+export type NationalIdSubtype = (typeof NATIONAL_ID_SUBTYPES)[number];
+
+export const BANK_SUBTYPES = [
+  'IBAN',
+  'SWIFT_BIC',
+  'US_ABA',
+  'UK_SORTCODE',
+  'IN_IFSC',
+  'IN_UPI',
+] as const;
+
+export type BankSubtype = (typeof BANK_SUBTYPES)[number];
 
 /** The exact format of a detected value; null where a type has only one. */
 export type EntitySubtype = NationalIdSubtype | BankSubtype;
+
+export function isEntitySubtype(value: unknown): value is EntitySubtype {
+  return (
+    (NATIONAL_ID_SUBTYPES as readonly unknown[]).includes(value) ||
+    (BANK_SUBTYPES as readonly unknown[]).includes(value)
+  );
+}
 
 export type DetectionSource = 'rule' | 'ner' | 'custom' | 'manual';
 

@@ -53,6 +53,11 @@ export default tseslint.config(
               'src/core is pure TypeScript and must not use browser APIs.',
           }),
         ),
+        ...['indexedDB', 'crypto'].map((name) => ({
+          name,
+          message:
+            'src/core receives IDBFactory and Crypto as parameters (see src/core/vault/service.ts).',
+        })),
       ],
       'no-restricted-imports': [
         'error',

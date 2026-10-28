@@ -6,6 +6,8 @@
  * never its message. Production builds compile every call away.
  */
 
+import type { VaultErrorCode } from '../core/vault/errors.ts';
+
 export type DevEvent =
   | 'instance.starting'
   | 'instance.ready'
@@ -37,7 +39,10 @@ export type DevEvent =
   | 'detection.loaded'
   | 'detection.failed'
   | 'warmup.done'
-  | 'warmup.failed';
+  | 'warmup.failed'
+  | 'vault.ready'
+  | 'vault.keys-lost'
+  | 'vault.failed';
 
 export type DevReason =
   | 'editor-missing'
@@ -76,6 +81,8 @@ export interface DevDetails {
   tier?: 1 | 2;
   category?: 'message' | 'other';
   transport?: 'fetch' | 'xhr' | 'websocket' | 'beacon';
+  /** Vault failure code. */
+  vault?: VaultErrorCode;
 }
 
 export function devlog(event: DevEvent, details: DevDetails = {}): void {
@@ -92,6 +99,7 @@ export function devlog(event: DevEvent, details: DevDetails = {}): void {
   if (details.transport !== undefined) {
     parts.push(`transport=${details.transport}`);
   }
+  if (details.vault !== undefined) parts.push(`vault=${details.vault}`);
   // Info level is visible with DevTools' default console levels.
   console.info(parts.join(' '));
 }
