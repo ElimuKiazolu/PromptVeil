@@ -416,6 +416,12 @@ export function startRestorer({
     attributeFilter: ['href'],
   });
 
+  // Mappings can change without the page changing (loaded from the vault
+  // after a refresh, another tab's send, or dropped): rescan then too.
+  const unsubscribe = source.subscribe(() => {
+    if (refreshMatcher()) schedule();
+  });
+
   // Catch up on messages already on screen. They are not streaming, so they
   // count as settled until they change.
   for (const container of adapter.getMessageContainers()) {
@@ -429,6 +435,7 @@ export function startRestorer({
     'abort',
     () => {
       observer.disconnect();
+      unsubscribe();
       if (frame !== null) cancelAnimationFrame(frame);
       for (const timer of quietTimers.values()) clearTimeout(timer);
       quietTimers.clear();

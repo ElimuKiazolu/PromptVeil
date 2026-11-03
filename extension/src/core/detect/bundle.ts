@@ -12,6 +12,7 @@
 import type { CountryCode } from '../../shared/country.ts';
 import type { Detection, EntityType } from '../../shared/entities.ts';
 import { createDraftAnalyzer } from '../draft/analyzer.ts';
+import { normaliseReal } from './normal-form.ts';
 import {
   clearRuleCaches,
   rulesAnalysis,
@@ -21,7 +22,7 @@ import { COUNTRY_PACKS, enabledPacks } from './rules/packs/index.ts';
 import type { Checkpoint, Yielder } from './schedule.ts';
 
 /** Changes whenever the module's exports change shape. */
-export const DETECTION_API_VERSION = 1;
+export const DETECTION_API_VERSION = 2;
 
 export interface DetectionConfig {
   readonly homeRegions: readonly CountryCode[];
@@ -43,6 +44,8 @@ export interface DetectionRuntime {
   dispose(): void;
   /** Builds lookup tables and compiles patterns, yielding at the checkpoint. */
   warmUp(checkpoint: Checkpoint): Promise<void>;
+  /** The vault normal form of a detected value (sent with it to the vault). */
+  normalise(detection: Detection): string;
 }
 
 export function createDetection(
@@ -69,5 +72,12 @@ export function createDetection(
       analyzer.dispose();
     },
     warmUp: (checkpoint) => warmUpRules(checkpoint),
+    normalise: (detection) =>
+      normaliseReal(
+        detection.type,
+        detection.subtype,
+        detection.country,
+        detection.value,
+      ),
   };
 }

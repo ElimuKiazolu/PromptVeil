@@ -4,7 +4,7 @@ import {
   installInterceptor,
   type PromptTransform,
 } from '@/src/content/interceptor.ts';
-import { createSpikeMasker } from '@/src/core/spike-mask.ts';
+import { createMemoryMasker } from '../memory-masker.ts';
 import { detectEmailsOnly } from '../spike-detect.ts';
 import { flush, pressKey, setUp, type Harness } from './harness.ts';
 
@@ -321,7 +321,7 @@ describe('installInterceptor', () => {
   });
 
   it('leaves a sent prompt masked when the site keeps it in the editor', async () => {
-    install(createSpikeMasker({ detect: detectEmailsOnly }).transform);
+    install(createMemoryMasker({ detect: detectEmailsOnly }).transform);
     h.editor.textContent = 'mail dana@example.com';
     pressKey(h.editor, { key: 'Enter' });
     await flush();
@@ -341,7 +341,7 @@ describe('installInterceptor', () => {
   });
 
   it('masks a send triggered by a synthetic page event', async () => {
-    install(createSpikeMasker({ detect: detectEmailsOnly }).transform);
+    install(createMemoryMasker({ detect: detectEmailsOnly }).transform);
     h.editor.textContent = 'mail dana@example.com';
     h.button.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
@@ -369,7 +369,7 @@ describe('installInterceptor', () => {
 
   describe('edit box', () => {
     it('masks a send from the edit box and leaves the main composer alone', async () => {
-      install(createSpikeMasker({ detect: detectEmailsOnly }).transform);
+      install(createMemoryMasker({ detect: detectEmailsOnly }).transform);
       h.editor.textContent = 'draft in main dana@example.com';
       h.edit.editor.textContent = 'Edited: write to ops@example.org';
       pressKey(h.edit.editor, { key: 'Enter' });
@@ -404,7 +404,7 @@ describe('installInterceptor', () => {
     });
 
     it('leaves known stand-ins in the edit box alone', async () => {
-      const masker = createSpikeMasker({ detect: detectEmailsOnly });
+      const masker = createMemoryMasker({ detect: detectEmailsOnly });
       install(masker.transform);
       h.editor.textContent = 'first dana@example.com';
       pressKey(h.editor, { key: 'Enter' });
@@ -420,7 +420,7 @@ describe('installInterceptor', () => {
     });
 
     it('gives a value masked earlier the same stand-in in the edit box', async () => {
-      install(createSpikeMasker({ detect: detectEmailsOnly }).transform);
+      install(createMemoryMasker({ detect: detectEmailsOnly }).transform);
       h.editor.textContent = 'first dana@example.com';
       pressKey(h.editor, { key: 'Enter' });
       await flush();
@@ -434,7 +434,7 @@ describe('installInterceptor', () => {
     });
 
     it('leaves stand-ins from an earlier page load alone', async () => {
-      install(createSpikeMasker({ detect: detectEmailsOnly }).transform);
+      install(createMemoryMasker({ detect: detectEmailsOnly }).transform);
       h.edit.editor.textContent =
         'old standin.7@example.net and dana@example.com';
       pressKey(h.edit.editor, { key: 'Enter' });

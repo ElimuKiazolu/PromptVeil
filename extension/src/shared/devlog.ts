@@ -6,7 +6,7 @@
  * never its message. Production builds compile every call away.
  */
 
-import type { VaultErrorCode } from '../core/vault/errors.ts';
+import type { VaultFailureCode } from './vault-protocol.ts';
 
 export type DevEvent =
   | 'instance.starting'
@@ -42,7 +42,20 @@ export type DevEvent =
   | 'warmup.failed'
   | 'vault.ready'
   | 'vault.keys-lost'
-  | 'vault.failed';
+  | 'vault.failed'
+  | 'vault.forbidden'
+  | 'vault.masked'
+  | 'vault.loaded'
+  | 'vault.load-failed'
+  | 'vault.migrated'
+  | 'vault.cleaned'
+  | 'vault.deleted-all'
+  | 'notice.failed'
+  | 'session.conversation'
+  | 'session.loaded'
+  | 'session.failed'
+  | 'session.migrated'
+  | 'session.dropped';
 
 export type DevReason =
   | 'editor-missing'
@@ -64,7 +77,13 @@ export type DevReason =
   | 'load-failed'
   | 'load-timeout'
   | 'invalid-module'
-  | 'disposed';
+  | 'disposed'
+  | 'no-receiver'
+  | 'rejected'
+  | 'invalid-response'
+  | 'keys-lost'
+  | 'vault-error'
+  | 'count-mismatch';
 
 const PREFIX = '[PromptVeil]';
 
@@ -82,7 +101,7 @@ export interface DevDetails {
   category?: 'message' | 'other';
   transport?: 'fetch' | 'xhr' | 'websocket' | 'beacon';
   /** Vault failure code. */
-  vault?: VaultErrorCode;
+  vault?: VaultFailureCode;
 }
 
 export function devlog(event: DevEvent, details: DevDetails = {}): void {

@@ -1,15 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
-  decryptValue,
-  encryptValue,
+  decryptReal,
+  encryptReal,
   randomDateOffsetDays,
   realHash,
   seedFor,
   type RecordBinding,
 } from '@/src/core/vault/crypto.ts';
-import { encodeFields, toBase64 } from '@/src/core/vault/encoding.ts';
+import {
+  decodeFields,
+  encodeFields,
+  toBase64,
+} from '@/src/core/vault/encoding.ts';
 import { VaultError } from '@/src/core/vault/errors.ts';
-import { normaliseReal, normaliseStandIn } from '@/src/core/vault/normalise.ts';
+import { normaliseReal } from '@/src/core/detect/normal-form.ts';
+import { normaliseStandIn } from '@/src/core/vault/normalise.ts';
 import { webCrypto } from './harness.ts';
 
 async function aesKey(): Promise<CryptoKey> {
@@ -26,6 +31,12 @@ async function hmacKey(): Promise<CryptoKey> {
     ['sign'],
   );
 }
+
+/** Fixture identity address with its normal form. */
+const REAL = {
+  value: 'Dana.Whitfield@example.com',
+  normalised: 'dana.whitfield@example.com',
+};
 
 const BINDING: RecordBinding = {
   store: 'mappings',
@@ -67,31 +78,87 @@ describe('field encoding', () => {
     ]);
   });
 
+  it('decodes exactly what it encoded', () => {
+    for (const list of [['AB', 'C'], [null, ''], [], ['é', null, 'x']]) {
+      expect(decodeFields(encodeFields(list))).toEqual(list);
+    }
+  });
+
+  it('refuses malformed bytes', () => {
+    const valid = encodeFields(['abc']);
+    for (const bytes of [
+      valid.subarray(0, 4),
+      valid.subarray(0, valid.length - 1),
+      new Uint8Array([...valid, 7]),
+      new Uint8Array([2]),
+      new Uint8Array([1, 0, 0, 0, 1, 0xff]),
+    ]) {
+      expect(decodeFields(bytes)).toBeNull();
+    }
+  });
+
   it('encodes base64 with padding', () => {
     expect(toBase64(new Uint8Array([0xff, 0x00]))).toBe('/wA=');
   });
 });
 
 describe('AES-GCM with record binding', () => {
-  it('round-trips a value', async () => {
+  it('round-trips a value with its normal form', async () => {
     const key = await aesKey();
-    const encrypted = await encryptValue(
-      webCrypto,
-      key,
-      'dana.whitfield@example.com',
-      BINDING,
-    );
+    const encrypted = await encryptReal(webCrypto, key, REAL, BINDING);
     expect(encrypted.iv).toHaveLength(12);
-    expect(await decryptValue(webCrypto, key, encrypted, BINDING)).toBe(
-      'dana.whitfield@example.com',
-    );
+    expect(await decryptReal(webCrypto, key, encrypted, BINDING)).toEqual(REAL);
+  });
+
+  it('refuses a plaintext that is not a sealed value', async () => {
+    const key = await aesKey();
+    const iv = webCrypto.getRandomValues(new Uint8Array(12));
+    const seal = async (plain: Uint8Array<ArrayBuffer>) => ({
+      iv,
+      ct: await webCrypto.subtle.encrypt(
+        {
+          name: 'AES-GCM',
+          iv,
+          additionalData: encodeFields([
+            'pv-aad/1',
+            BINDING.store,
+            BINDING.recordId,
+            BINDING.conversationId,
+            BINDING.type,
+            BINDING.subtype,
+          ]),
+        },
+        key,
+        plain,
+      ),
+    });
+    // The control case decrypts, so the others fail for their payload only.
+    expect(
+      await decryptReal(
+        webCrypto,
+        key,
+        await seal(encodeFields(['pv-real/1', 'a', 'b'])),
+        BINDING,
+      ),
+    ).toEqual({ value: 'a', normalised: 'b' });
+    for (const plain of [
+      new TextEncoder().encode('just text'),
+      encodeFields(['pv-real/2', 'a', 'b']),
+      encodeFields(['pv-real/1', 'a']),
+      encodeFields(['pv-real/1', 'a', null]),
+      encodeFields(['pv-real/1', 'a', 'b', 'c']),
+    ]) {
+      await expectDecryptFailed(
+        decryptReal(webCrypto, key, await seal(plain), BINDING),
+      );
+    }
   });
 
   it('uses a fresh IV for every encryption', async () => {
     const key = await aesKey();
     const ivs = new Set<string>();
     for (let i = 0; i < 2_000; i += 1) {
-      const { iv } = await encryptValue(webCrypto, key, 'same value', BINDING);
+      const { iv } = await encryptReal(webCrypto, key, REAL, BINDING);
       ivs.add(toBase64(iv));
     }
     expect(ivs.size).toBe(2_000);
@@ -99,32 +166,22 @@ describe('AES-GCM with record binding', () => {
 
   it('rejects a tampered ciphertext, IV or record binding', async () => {
     const key = await aesKey();
-    const encrypted = await encryptValue(
-      webCrypto,
-      key,
-      'secret value',
-      BINDING,
-    );
+    const encrypted = await encryptReal(webCrypto, key, REAL, BINDING);
 
     const ct = new Uint8Array(encrypted.ct.slice(0));
     ct[0] = (ct[0] ?? 0) ^ 1;
     await expectDecryptFailed(
-      decryptValue(
-        webCrypto,
-        key,
-        { iv: encrypted.iv, ct: ct.buffer },
-        BINDING,
-      ),
+      decryptReal(webCrypto, key, { iv: encrypted.iv, ct: ct.buffer }, BINDING),
     );
 
     const iv = encrypted.iv.slice();
     iv[0] = (iv[0] ?? 0) ^ 1;
     await expectDecryptFailed(
-      decryptValue(webCrypto, key, { iv, ct: encrypted.ct }, BINDING),
+      decryptReal(webCrypto, key, { iv, ct: encrypted.ct }, BINDING),
     );
 
     await expectDecryptFailed(
-      decryptValue(
+      decryptReal(
         webCrypto,
         key,
         { iv: encrypted.iv.slice(0, 8), ct: encrypted.ct },
@@ -142,20 +199,20 @@ describe('AES-GCM with record binding', () => {
     ];
     for (const binding of otherBindings) {
       await expectDecryptFailed(
-        decryptValue(webCrypto, key, encrypted, binding),
+        decryptReal(webCrypto, key, encrypted, binding),
       );
     }
   });
 
   it('rejects a ciphertext under another key', async () => {
-    const encrypted = await encryptValue(
+    const encrypted = await encryptReal(
       webCrypto,
       await aesKey(),
-      'x',
+      REAL,
       BINDING,
     );
     await expectDecryptFailed(
-      decryptValue(webCrypto, await aesKey(), encrypted, BINDING),
+      decryptReal(webCrypto, await aesKey(), encrypted, BINDING),
     );
   });
 });
@@ -274,71 +331,7 @@ describe('randomDateOffsetDays', () => {
   });
 });
 
-describe('normal forms', () => {
-  it('normalises each type as the schema specifies', () => {
-    // GB phone: libphonenumber's own GB mobile example number.
-    expect(
-      normaliseReal('EMAIL', null, null, '  Dana.Whitfield@Example.COM '),
-    ).toBe('dana.whitfield@example.com');
-    expect(normaliseReal('PHONE', null, 'GB', '07400 123456')).toBe(
-      '+447400123456',
-    );
-    expect(normaliseReal('PHONE', null, null, '+44 7400 123456')).toBe(
-      '+447400123456',
-    );
-    expect(normaliseReal('CARD', null, null, '4242-4242 4242.4242')).toBe(
-      '4242424242424242',
-    );
-    expect(
-      normaliseReal('BANK', 'IBAN', 'GB', 'gb82 west 1234 5698 7654 32'),
-    ).toBe('GB82WEST12345698765432');
-    expect(normaliseReal('BANK', 'IN_UPI', 'IN', ' Name@Bank ')).toBe(
-      'name@bank',
-    );
-    expect(normaliseReal('BANK', 'SWIFT_BIC', null, 'deut de ff')).toBe(
-      'DEUTDEFF',
-    );
-    expect(normaliseReal('NATIONAL_ID', 'BR_CPF', 'BR', '111.444.777-35')).toBe(
-      '11144477735',
-    );
-    expect(
-      normaliseReal('NATIONAL_ID', 'CN_RIC', 'CN', '11010519491231002x'),
-    ).toBe('11010519491231002X');
-    expect(normaliseReal('PASSPORT', null, null, 'ab 123-456')).toBe(
-      'AB123456',
-    );
-    expect(normaliseReal('POSTCODE', null, 'GB', 'sw1a 1aa')).toBe('SW1A1AA');
-    expect(normaliseReal('SECRET', null, null, 'AbC-123')).toBe('AbC-123');
-    expect(normaliseReal('CRYPTO', null, null, ' 1AbC ')).toBe(' 1AbC ');
-    expect(normaliseReal('DATE', null, null, ' 1 May 2020 ')).toBe(
-      '1 May 2020',
-    );
-  });
-
-  it('collapses spaces, lower-cases and strips leading titles from names', () => {
-    expect(
-      normaliseReal('PERSON', null, null, '  Dr.  Dana   Whitfield '),
-    ).toBe('dana whitfield');
-    expect(
-      normaliseReal('PERSON', null, null, 'Prof. Dr. Dana Whitfield'),
-    ).toBe('dana whitfield');
-    expect(normaliseReal('PERSON', null, null, 'Mme Dana Whitfield')).toBe(
-      'dana whitfield',
-    );
-    expect(normaliseReal('PERSON', null, null, 'M. Dana Whitfield')).toBe(
-      'dana whitfield',
-    );
-    // A bare initial is not a title; a lone title is kept rather than emptied.
-    expect(normaliseReal('PERSON', null, null, 'M Dana')).toBe('m dana');
-    expect(normaliseReal('PERSON', null, null, 'Dr')).toBe('dr');
-    // NFC: a decomposed é equals the composed one.
-    const decomposed = `Cafe${String.fromCodePoint(0x301)} Ltd`;
-    const composed = `Caf${String.fromCodePoint(0xe9)} Ltd`;
-    expect(normaliseReal('ORG', null, null, decomposed)).toBe(
-      normaliseReal('ORG', null, null, composed),
-    );
-  });
-
+describe('stand-in normal form', () => {
   it('normalises stand-ins by case and separators', () => {
     expect(normaliseStandIn('+1 (212) 555-0142')).toBe('+12125550142');
     expect(normaliseStandIn('Jane.Doe@Example.com')).toBe('janedoe@examplecom');

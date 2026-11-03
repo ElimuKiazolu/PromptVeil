@@ -89,7 +89,7 @@ export default defineConfig({
     version: '0.1.0',
     description:
       'Masks personal data in prompts to AI chatbots with realistic stand-ins and restores it in the replies. Runs entirely on your device.',
-    permissions: ['storage', 'unlimitedStorage', 'offscreen'],
+    permissions: ['storage', 'unlimitedStorage', 'offscreen', 'alarms'],
     host_permissions: [
       'https://chatgpt.com/*',
       'https://gemini.google.com/*',

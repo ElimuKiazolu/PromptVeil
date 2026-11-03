@@ -35,18 +35,33 @@ const OPS: StandInMapping = {
 function mutableSource(initial: StandInMapping[]) {
   let mappings = initial;
   let version = 1;
+  const listeners = new Set<() => void>();
   const source: StandInSource = {
     get version() {
       return version;
     },
     mappings: () => mappings,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
   return {
     source,
+    /** A new mapping, noticed at the next page change. */
     add(mapping: StandInMapping) {
       mappings = [...mappings, mapping];
       version += 1;
     },
+    /** New mappings announced to subscribers (e.g. loaded from the vault). */
+    publish(next: StandInMapping[]) {
+      mappings = next;
+      version += 1;
+      for (const listener of listeners) listener();
+    },
+    listenerCount: () => listeners.size,
   };
 }
 
@@ -315,6 +330,22 @@ describe('startRestorer', () => {
     const leak = lines.filter((line) => line.includes('restore.leak-check'));
     expect(leak.at(-1)).toMatch(/count=1$/);
     for (const line of lines) expect(line).not.toContain('@');
+  });
+
+  it('restores text already on screen when mappings arrive without a page change', async () => {
+    const source = mutableSource([]);
+    start(source.source);
+    await settle();
+    expect(source.listenerCount()).toBe(1);
+    // Mappings loaded from the vault after a refresh: no DOM mutation.
+    source.publish([DANA]);
+    await settle();
+    expect(assistantContent().textContent).not.toContain(
+      'standin.1@example.net',
+    );
+    expect(assistantContent().textContent).toContain('dana@example.com');
+    controller.abort();
+    expect(source.listenerCount()).toBe(0);
   });
 
   it('stops restoring when aborted', async () => {

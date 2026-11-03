@@ -34,7 +34,11 @@ const DANA: StandInMapping = {
   boundary: 'email',
 };
 
-const source: StandInSource = { version: 1, mappings: () => [DANA] };
+const source: StandInSource = {
+  version: 1,
+  mappings: () => [DANA],
+  subscribe: () => () => undefined,
+};
 
 async function settle(): Promise<void> {
   await Promise.resolve();

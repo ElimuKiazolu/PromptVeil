@@ -2,6 +2,8 @@ import { createChatGptAdapter } from '@/src/adapters/chatgpt.ts';
 import { createLazyDetection } from '@/src/content/detection-loader.ts';
 import { startInstance } from '@/src/content/instance.ts';
 import { startNetBridge } from '@/src/content/net-bridge.ts';
+import { vaultLifecycle } from '@/src/content/vault-lifecycle.ts';
+import { createVaultSession } from '@/src/content/vault-session.ts';
 import { createMainThreadYielder } from '@/src/content/yielder.ts';
 import { createCheckpoint } from '@/src/core/detect/schedule.ts';
 import {
@@ -11,13 +13,8 @@ import {
 import { regionsFromLanguages } from '@/src/shared/country.ts';
 import { devlog } from '@/src/shared/devlog.ts';
 import { isExtensionContextValid } from '@/src/shared/extension-context.ts';
+import { createMessenger, PROTOCOL } from '@/src/shared/messaging.ts';
 import { DEFAULT_SETTINGS } from '@/src/shared/settings.ts';
-
-/** Four random base-36 characters, distinct per page load. */
-function randomSessionTag(): string {
-  const [value = 0] = crypto.getRandomValues(new Uint32Array(1));
-  return (value % 36 ** 4).toString(36).padStart(4, '0');
-}
 
 /** Longest wait for an idle period before loading detection anyway. */
 const IDLE_TIMEOUT_MS = 2000;
@@ -70,16 +67,30 @@ export default defineContentScript({
           yielder,
         ),
     });
+    // The service worker keeps the mappings; this tab holds the current
+    // conversation's in memory while the page shows it.
+    const session = createVaultSession({
+      adapter,
+      messenger: createMessenger(PROTOCOL, browser.runtime),
+      beforePublish: (mappings) => {
+        net.sync(mappings);
+      },
+      randomUUID: () => crypto.randomUUID(),
+    });
     const masker = createSpikeMasker({
-      sessionTag: randomSessionTag(),
       // A Send before the module is ready waits for it; if it cannot load,
       // the transform rejects and the Send is blocked.
       detect: async (text) => (await detection.ready()).analyse(text),
+      normalise: async (found) => (await detection.ready()).normalise(found),
+      // Any vault failure rejects, and the Send is blocked.
+      issue: (items) => session.mask(items),
+      isIssued: (value) => session.isIssued(value),
     });
     startInstance({
       adapter,
       transform: masker.transform,
-      source: masker.source,
+      source: session.source,
+      session: vaultLifecycle(session, browser.runtime),
       net,
       isContextValid: isExtensionContextValid,
       signal: ctx.signal,

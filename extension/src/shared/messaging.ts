@@ -12,11 +12,16 @@
  * Not for the MAIN-world request net: that is a separate keyed DOM event
  * channel (src/net/channel.ts), because the page's world has no runtime API.
  *
- * Messages carry no real values except where a later phase needs prompt text
- * to cross contexts (content → offscreen NER). Logs only ever name the
+ * Real values cross contexts only where the vault needs them (content
+ * script → service worker, see vault-protocol.ts) and, in a later phase,
+ * prompt text for NER (content → offscreen). Logs only ever name the
  * failure, never a payload.
+ *
+ * Notices are one-way messages from the service worker to the content
+ * scripts of a tab (tabs.sendMessage); they carry no real values.
  */
 import { devlog } from './devlog.ts';
+import { VAULT_PROTOCOL, type VaultProtocol } from './vault-protocol.ts';
 
 /** A shape check for data that arrived from another context. */
 export type Guard<T> = (value: unknown) => value is T;
@@ -38,14 +43,10 @@ export type ProtocolSpec<P extends ProtocolShape<P>> = {
   };
 };
 
-/**
- * The extension's messages. Entries are added as features need them; the
- * first are the pipeline and NER requests (P3, P7). Until then every name
- * maps to never, so nothing can be sent or handled.
- */
-export type Protocol = Record<string, never>;
+/** The extension's messages. Entries are added as features need them. */
+export type Protocol = VaultProtocol;
 
-export const PROTOCOL: ProtocolSpec<Protocol> = {};
+export const PROTOCOL: ProtocolSpec<Protocol> = VAULT_PROTOCOL;
 
 export type MessagingError =
   /** No reply within the timeout. */
@@ -271,4 +272,53 @@ export function createMessenger<P extends ProtocolShape<P>>(
   };
 
   return { send, handle };
+}
+
+/** A one-way message from the service worker to a tab. */
+interface NoticeEnvelope {
+  channel: typeof CHANNEL;
+  notice: unknown;
+}
+
+function isNoticeEnvelope(value: unknown): value is NoticeEnvelope {
+  return isRecord(value) && value.channel === CHANNEL && 'notice' in value;
+}
+
+/** Wraps a notice for tabs.sendMessage. */
+export function noticeEnvelope(notice: unknown): NoticeEnvelope {
+  return { channel: CHANNEL, notice };
+}
+
+/**
+ * Receives notices in a content script. Only notices from this extension's
+ * own pages or service worker count: a message relayed by a content script
+ * carries `sender.tab` and is ignored. Never replies. Returns the removal.
+ */
+export function listenForNotices<T>(
+  runtime: RuntimeLike,
+  guard: Guard<T>,
+  handler: (notice: T) => void,
+): () => void {
+  const listener: RuntimeListener = (message, sender) => {
+    if (!isNoticeEnvelope(message)) return undefined;
+    const runtimeId = runtime.id;
+    if (
+      runtimeId === undefined ||
+      sender.id !== runtimeId ||
+      sender.tab !== undefined
+    ) {
+      devlog('message.rejected', { reason: 'foreign-sender' });
+      return undefined;
+    }
+    if (!guard(message.notice)) {
+      devlog('message.rejected', { reason: 'invalid-shape' });
+      return undefined;
+    }
+    handler(message.notice);
+    return undefined;
+  };
+  runtime.onMessage.addListener(listener);
+  return () => {
+    runtime.onMessage.removeListener(listener);
+  };
 }

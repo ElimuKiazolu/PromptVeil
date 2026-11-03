@@ -6,7 +6,12 @@
  * connection and keys are dropped and the next operation opens afresh.
  */
 import type { Mapping } from '@/src/shared/entities.ts';
-import { openVaultDb } from './db.ts';
+import {
+  deleteExpired,
+  type CleanupOptions,
+  type CleanupResult,
+} from './cleanup.ts';
+import { deleteVaultDb, openVaultDb } from './db.ts';
 import { VaultError } from './errors.ts';
 import { ensureKeys, type KeyState } from './keys.ts';
 import {
@@ -22,6 +27,13 @@ import {
   type RealValue,
   type VaultContext,
 } from './mappings.ts';
+import {
+  maskValues,
+  type MaskRequest,
+  type MaskResult,
+  type StandInGenerator,
+} from './mask.ts';
+import { migrateConversation, type MigrationOutcome } from './migrate.ts';
 import type { Migration } from './schema.ts';
 import type { ConversationRecord } from './types.ts';
 
@@ -43,6 +55,20 @@ export interface VaultService {
   isStandInTaken(conversationId: string, surrogate: string): Promise<boolean>;
   insertMapping(input: NewMapping): Promise<InsertResult>;
   loadConversation(conversationId: string): Promise<LoadedConversation>;
+  /** Stand-ins for every item of a send (see mask.ts). */
+  maskValues(
+    request: MaskRequest,
+    generate?: StandInGenerator,
+  ): Promise<MaskResult>;
+  /** Moves a pending chat to the ID the site assigned (see migrate.ts). */
+  migrate(from: string, to: string): Promise<MigrationOutcome>;
+  /** Auto-delete (see cleanup.ts); works without keys. */
+  deleteExpired(options: CleanupOptions): Promise<CleanupResult>;
+  /**
+   * Deletes the whole database (mappings, conversations, log, custom terms,
+   * keys). The next operation opens a fresh one and creates new keys.
+   */
+  deleteDatabase(): Promise<void>;
   /** Closes the connection; the next operation opens it again. */
   close(): void;
 }
@@ -106,6 +132,21 @@ export function createVaultService(deps: VaultDeps): VaultService {
     return { db: await database(), crypto: deps.crypto, keys: state.keys, now };
   };
 
+  const close = (): void => {
+    const current = connection;
+    drop();
+    if (current !== null) {
+      void current.then(
+        (db) => {
+          db.close();
+        },
+        // A connection that failed to open has nothing to close; the
+        // failure was already reported to the operation that opened it.
+        () => undefined,
+      );
+    }
+  };
+
   return {
     ensureKeys: keys,
     createConversation: async (input) =>
@@ -117,19 +158,21 @@ export function createVaultService(deps: VaultDeps): VaultService {
     insertMapping: async (input) => insertMapping(await context(), input),
     loadConversation: async (conversationId) =>
       loadConversation(await context(), conversationId),
-    close: () => {
-      const current = connection;
-      drop();
-      if (current !== null) {
-        void current.then(
-          (db) => {
-            db.close();
-          },
-          // A connection that failed to open has nothing to close; the
-          // failure was already reported to the operation that opened it.
-          () => undefined,
-        );
-      }
+    maskValues: async (request, generate) =>
+      maskValues(await context(), request, generate),
+    migrate: async (from, to) => migrateConversation(await context(), from, to),
+    deleteExpired: async (options) =>
+      deleteExpired(await database(), now(), options),
+    deleteDatabase: async () => {
+      // Transactions already running finish first; the deletion waits for
+      // the connection to close.
+      close();
+      await deleteVaultDb({
+        idb: deps.idb,
+        name: deps.name,
+        blockedTimeoutMs: deps.blockedTimeoutMs,
+      });
     },
+    close,
   };
 }

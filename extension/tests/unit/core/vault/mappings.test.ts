@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer';
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import type { Mapping } from '@/src/shared/entities.ts';
@@ -14,9 +13,17 @@ import {
   type RealValue,
   type VaultContext,
 } from '@/src/core/vault/mappings.ts';
-import { normaliseReal } from '@/src/core/vault/normalise.ts';
 import { STORE } from '@/src/core/vault/schema.ts';
-import { dumpAll, getRaw, openV1, putRaw, webCrypto } from './harness.ts';
+import {
+  dumpAll,
+  findPlaintext,
+  getRaw,
+  needles,
+  openV1,
+  putRaw,
+  realValue,
+  webCrypto,
+} from './harness.ts';
 
 const CONV = 'chatgpt:conv-1';
 const OTHER_CONV = 'chatgpt:conv-2';
@@ -48,42 +55,42 @@ async function setUp(factory = new IDBFactory()): Promise<VaultContext> {
 // Test values: fixture identity (fictional name, example.com address),
 // libphonenumber's GB example number, the published example IBAN, UIDAI's
 // test Aadhaar number, and a made-up random key.
-const EMAIL: RealValue = {
+const EMAIL = realValue({
   type: 'EMAIL',
   subtype: null,
   country: null,
   value: 'Dana.Whitfield@example.com',
-};
-const PHONE: RealValue = {
+});
+const PHONE = realValue({
   type: 'PHONE',
   subtype: null,
   country: 'GB',
   value: '07400 123456',
-};
-const IBAN: RealValue = {
+});
+const IBAN = realValue({
   type: 'BANK',
   subtype: 'IBAN',
   country: 'GB',
   value: 'GB82 WEST 1234 5698 7654 32',
-};
-const AADHAAR: RealValue = {
+});
+const AADHAAR = realValue({
   type: 'NATIONAL_ID',
   subtype: 'IN_AADHAAR',
   country: 'IN',
   value: '9999 4105 7058',
-};
-const PERSON: RealValue = {
+});
+const PERSON = realValue({
   type: 'PERSON',
   subtype: null,
   country: null,
   value: 'Dana Whitfield',
-};
-const SECRET: RealValue = {
+});
+const SECRET = realValue({
   type: 'SECRET',
   subtype: null,
   country: null,
   value: 'Zq8fK2mVx9LpR4tW7nB3cY6hJ1dG5sQe',
-};
+});
 
 function newMapping(
   real: RealValue,
@@ -168,16 +175,18 @@ describe('insert and find', () => {
       mappingCount: 1,
     });
 
-    const first = await findByReal(context, CONV, {
-      ...AADHAAR,
-      value: '999941057058',
-    });
+    const first = await findByReal(
+      context,
+      CONV,
+      realValue({ ...AADHAAR, value: '999941057058' }),
+    );
     expect(first?.id).toBe(mapping.id);
     expect(first?.hitCount).toBe(1);
-    const second = await findByReal(context, CONV, {
-      ...AADHAAR,
-      value: '9999-4105-7058',
-    });
+    const second = await findByReal(
+      context,
+      CONV,
+      realValue({ ...AADHAAR, value: '9999-4105-7058' }),
+    );
     expect(second?.hitCount).toBe(2);
     const stored = await getRaw(context.db, STORE.mappings, mapping.id);
     expect(stored).toMatchObject({ hitCount: 2 });
@@ -221,7 +230,7 @@ describe('insert and find', () => {
     const again = await insertMapping(
       context,
       newMapping(
-        { ...EMAIL, value: 'dana.whitfield@EXAMPLE.com' },
+        realValue({ ...EMAIL, value: 'dana.whitfield@EXAMPLE.com' }),
         'standin.two@example.net',
       ),
     );
@@ -245,7 +254,10 @@ describe('insert and find', () => {
       insertMapping(tabA, newMapping(PHONE, '07400 654321')),
       insertMapping(
         tabB,
-        newMapping({ ...PHONE, value: '+44 7400 123456' }, '07400 765432'),
+        newMapping(
+          realValue({ ...PHONE, value: '+44 7400 123456' }),
+          '07400 765432',
+        ),
       ),
     ]);
     expect(results.map((result) => result.status).sort()).toEqual([
@@ -267,7 +279,7 @@ describe('insert and find', () => {
     const result = await insertMapping(
       context,
       newMapping(
-        { ...EMAIL, value: 'other.person@example.com' },
+        realValue({ ...EMAIL, value: 'other.person@example.com' }),
         'Standin.One@example.net',
       ),
     );
@@ -374,49 +386,6 @@ describe('loadConversation', () => {
     expect(loaded).toEqual({ entries: [], failed: 1 });
   });
 });
-
-/** Byte and text forms a value could take if it were stored in the clear. */
-function needles(real: RealValue): string[] {
-  const forms = new Set<string>([
-    real.value,
-    real.value.toLowerCase(),
-    real.value.toUpperCase(),
-    normaliseReal(real.type, real.subtype, real.country, real.value),
-  ]);
-  const digits = real.value.replace(/\D/gu, '');
-  if (digits.length >= 6) forms.add(digits);
-  return [...forms];
-}
-
-/** Every place in a stored value where one of `forms` appears in plaintext. */
-function findPlaintext(
-  value: unknown,
-  forms: readonly string[],
-  path = '$',
-): string[] {
-  if (typeof value === 'string') {
-    return forms.some((form) => value.includes(form)) ? [path] : [];
-  }
-  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
-    const bytes =
-      value instanceof ArrayBuffer
-        ? Buffer.from(value)
-        : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
-    const hit = forms.some(
-      (form) =>
-        bytes.includes(Buffer.from(form, 'utf8')) ||
-        bytes.includes(Buffer.from(form, 'utf16le')),
-    );
-    return hit ? [path] : [];
-  }
-  if (typeof value === 'object' && value !== null) {
-    return Object.entries(value).flatMap(([key, child]) => [
-      ...(forms.some((form) => key.includes(form)) ? [`${path} key`] : []),
-      ...findPlaintext(child, forms, `${path}.${key}`),
-    ]);
-  }
-  return [];
-}
 
 describe('plaintext scan', () => {
   it('stores no real value or normal form anywhere in any store', async () => {

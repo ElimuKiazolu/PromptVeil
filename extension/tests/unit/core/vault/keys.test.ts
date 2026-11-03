@@ -1,8 +1,8 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import {
-  decryptValue,
-  encryptValue,
+  decryptReal,
+  encryptReal,
   type RecordBinding,
 } from '@/src/core/vault/crypto.ts';
 import { ensureKeys, type KeyState } from '@/src/core/vault/keys.ts';
@@ -34,8 +34,13 @@ const BINDING: RecordBinding = {
 
 /** True when data encrypted with `a` decrypts with `b` (same key material). */
 async function sameEncKey(a: VaultKeys, b: VaultKeys): Promise<boolean> {
-  const encrypted = await encryptValue(webCrypto, a.enc, 'probe', BINDING);
-  return decryptValue(webCrypto, b.enc, encrypted, BINDING).then(
+  const encrypted = await encryptReal(
+    webCrypto,
+    a.enc,
+    { value: 'probe', normalised: 'probe' },
+    BINDING,
+  );
+  return decryptReal(webCrypto, b.enc, encrypted, BINDING).then(
     () => true,
     () => false,
   );

@@ -20,6 +20,12 @@ export interface StandInMapping {
 export interface StandInSource {
   readonly version: number;
   mappings(): readonly StandInMapping[];
+  /**
+   * Calls `listener` after every change (e.g. mappings loaded from the vault
+   * or dropped), including changes no page update would reveal. Returns the
+   * removal.
+   */
+  subscribe(listener: () => void): () => void;
 }
 
 /** A stand-in found in text, as [start, end) UTF-16 offsets. */

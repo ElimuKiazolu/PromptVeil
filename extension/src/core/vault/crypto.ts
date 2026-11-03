@@ -4,7 +4,10 @@
  * - Real values: AES-GCM 256, a fresh random 96-bit IV per encryption, and
  *   additional authenticated data naming the record (store, record id,
  *   conversation, type, subtype), so a ciphertext only decrypts in the
- *   record it was written for.
+ *   record it was written for. The plaintext is the value together with its
+ *   normal form ("pv-real/1", value, normalised): the vault never computes
+ *   normal forms itself (the phone library stays out of the service
+ *   worker), yet can re-hash a value when it moves to another conversation.
  * - realHash: HMAC-SHA-256(lookup, "pv-lookup/1", conversationId, type,
  *   subtype, norm(real)), base64. The conversation is part of the input, so
  *   one value cannot be linked across conversations on disk.
@@ -17,12 +20,13 @@ import type {
   EntityType,
   EncryptedValue,
 } from '@/src/shared/entities.ts';
-import { encodeFields, toBase64 } from './encoding.ts';
+import { decodeFields, encodeFields, toBase64 } from './encoding.ts';
 import { VaultError } from './errors.ts';
 import type { StoreName } from './schema.ts';
 
 const IV_BYTES = 12;
 const AAD_TAG = 'pv-aad/1';
+const REAL_TAG = 'pv-real/1';
 const LOOKUP_TAG = 'pv-lookup/1';
 const SEED_TAG = 'pv-seed/1';
 
@@ -47,30 +51,37 @@ function additionalData(binding: RecordBinding): Uint8Array<ArrayBuffer> {
   ]);
 }
 
-const encoder = new TextEncoder();
+/** A real value and its vault normal form, as sealed in a record. */
+export interface SealedReal {
+  value: string;
+  normalised: string;
+}
 
-export async function encryptValue(
+export async function encryptReal(
   crypto: Crypto,
   key: CryptoKey,
-  value: string,
+  real: SealedReal,
   binding: RecordBinding,
 ): Promise<EncryptedValue> {
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const ct = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv, additionalData: additionalData(binding) },
     key,
-    encoder.encode(value),
+    encodeFields([REAL_TAG, real.value, real.normalised]),
   );
   return { iv, ct };
 }
 
-/** Rejects with `decrypt-failed` unless key, IV, ciphertext and record all match. */
-export async function decryptValue(
+/**
+ * Rejects with `decrypt-failed` unless key, IV, ciphertext and record all
+ * match and the plaintext is a well-formed sealed value.
+ */
+export async function decryptReal(
   crypto: Crypto,
   key: CryptoKey,
   encrypted: EncryptedValue,
   binding: RecordBinding,
-): Promise<string> {
+): Promise<SealedReal> {
   if (encrypted.iv.length !== IV_BYTES) throw new VaultError('decrypt-failed');
   let plain: ArrayBuffer;
   try {
@@ -86,18 +97,22 @@ export async function decryptValue(
   } catch (error) {
     throw new VaultError('decrypt-failed', { cause: error });
   }
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(plain);
-  } catch (error) {
-    throw new VaultError('decrypt-failed', { cause: error });
+  const fields = decodeFields(new Uint8Array(plain));
+  if (fields?.length !== 3 || fields[0] !== REAL_TAG) {
+    throw new VaultError('decrypt-failed');
   }
+  const [, value, normalised] = fields;
+  if (typeof value !== 'string' || typeof normalised !== 'string') {
+    throw new VaultError('decrypt-failed');
+  }
+  return { value, normalised };
 }
 
 export interface RealHashInput {
   conversationId: string;
   type: EntityType;
   subtype: EntitySubtype | null;
-  /** The value in its vault normal form (normaliseReal). */
+  /** The value in its vault normal form (normaliseReal, src/core/detect/normal-form.ts). */
   normalised: string;
 }
 

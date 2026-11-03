@@ -2,8 +2,13 @@
  * Vault test helpers: an isolated in-memory IndexedDB per test
  * (fake-indexeddb) and Node's Web Crypto.
  */
+import { Buffer } from 'node:buffer';
 import { forceCloseDatabase, IDBFactory } from 'fake-indexeddb';
+import { normaliseReal } from '@/src/core/detect/normal-form.ts';
 import { openVaultDb } from '@/src/core/vault/db.ts';
+import { VaultError } from '@/src/core/vault/errors.ts';
+import { ensureKeys } from '@/src/core/vault/keys.ts';
+import type { RealValue, VaultContext } from '@/src/core/vault/mappings.ts';
 import { MIGRATIONS, type Migration } from '@/src/core/vault/schema.ts';
 
 export const webCrypto: Crypto = globalThis.crypto;
@@ -134,4 +139,76 @@ export function getRaw(
       reject(request.error ?? new Error('get failed'));
     };
   });
+}
+
+/** A real value with the normal form the detection module would send. */
+export function realValue(fields: Omit<RealValue, 'normalised'>): RealValue {
+  return {
+    ...fields,
+    normalised: normaliseReal(
+      fields.type,
+      fields.subtype,
+      fields.country,
+      fields.value,
+    ),
+  };
+}
+
+/** Byte and text forms a value could take if it were stored in the clear. */
+export function needles(real: RealValue): string[] {
+  const forms = new Set<string>([
+    real.value,
+    real.value.toLowerCase(),
+    real.value.toUpperCase(),
+    real.normalised,
+  ]);
+  const digits = real.value.replace(/\D/gu, '');
+  if (digits.length >= 6) forms.add(digits);
+  return [...forms];
+}
+
+/** Every place in a stored value where one of `forms` appears in plaintext. */
+export function findPlaintext(
+  value: unknown,
+  forms: readonly string[],
+  path = '$',
+): string[] {
+  if (typeof value === 'string') {
+    return forms.some((form) => value.includes(form)) ? [path] : [];
+  }
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    const bytes =
+      value instanceof ArrayBuffer
+        ? Buffer.from(value)
+        : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+    const hit = forms.some(
+      (form) =>
+        bytes.includes(Buffer.from(form, 'utf8')) ||
+        bytes.includes(Buffer.from(form, 'utf16le')),
+    );
+    return hit ? [path] : [];
+  }
+  if (typeof value === 'object' && value !== null) {
+    return Object.entries(value).flatMap(([key, child]) => [
+      ...(forms.some((form) => key.includes(form)) ? [`${path} key`] : []),
+      ...findPlaintext(child, forms, `${path}.${key}`),
+    ]);
+  }
+  return [];
+}
+
+/** An open vault with keys, as the service would hand to an operation. */
+export async function readyContext(
+  factory: IDBFactory = new IDBFactory(),
+  now: () => number = () => 1_000,
+): Promise<VaultContext> {
+  const db = await openV1(factory);
+  const state = await ensureKeys(db, webCrypto, now);
+  if (state.status !== 'ready') throw new Error('keys not ready');
+  return { db, crypto: webCrypto, keys: state.keys, now };
+}
+
+/** The VaultError code of a rejection, for assertions. */
+export function codeOf(error: unknown): string {
+  return error instanceof VaultError ? error.code : 'not a VaultError';
 }

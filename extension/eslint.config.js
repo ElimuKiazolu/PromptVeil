@@ -142,6 +142,7 @@ export default tseslint.config(
             {
               group: [
                 '**/core/detect/bundle*',
+                '**/core/detect/normal-form*',
                 '**/core/detect/rules/**',
                 '**/core/detect/validators/**',
                 '**/core/draft/**',
@@ -153,6 +154,56 @@ export default tseslint.config(
                 'Detection code loads at run time as detection.js; import its types only.',
             },
           ],
+        },
+      ],
+    },
+  },
+  {
+    // The service worker evaluates its whole bundle at every start; the
+    // detection code (phone metadata above all) stays out of it. Normal
+    // forms arrive with each value from the content script.
+    files: [
+      'entrypoints/background.ts',
+      'src/background/**/*.ts',
+      'src/core/vault/**/*.ts',
+    ],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/core/detect/**',
+                '**/core/draft/**',
+                'libphonenumber-js',
+                'libphonenumber-js/*',
+              ],
+              allowTypeImports: true,
+              message:
+                'Detection code stays out of the service worker; import its types only.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // Requests to the service worker can carry real values. Every extension
+    // context with a runtime message listener receives them, so pages
+    // (popup, options, in-page UI) must not listen.
+    files: [
+      'entrypoints/popup/**/*.{ts,tsx}',
+      'entrypoints/options/**/*.{ts,tsx}',
+      'src/ui/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'MemberExpression[property.name="onMessage"]',
+          message:
+            'Only the service worker and content scripts listen for runtime messages.',
         },
       ],
     },

@@ -184,3 +184,78 @@ export async function withTransaction<T>(
   if (abortError !== null) throw abortError;
   return result;
 }
+
+/**
+ * Walks a cursor request to its end, calling `visit` for each position
+ * (it may update or delete the record). `visit` returns false to stop early.
+ */
+export function forEachCursor(
+  request: IDBRequest<IDBCursorWithValue | null>,
+  visit: (cursor: IDBCursorWithValue) => boolean | undefined,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (cursor === null) {
+        resolve();
+        return;
+      }
+      try {
+        if (visit(cursor) === false) {
+          resolve();
+          return;
+        }
+        cursor.continue();
+      } catch (error) {
+        reject(toVaultError(error, 'aborted'));
+      }
+    };
+    request.onerror = () => {
+      reject(toVaultError(request.error, 'aborted'));
+    };
+  });
+}
+
+export interface DeleteVaultOptions {
+  idb: IDBFactory;
+  name?: string;
+  blockedTimeoutMs?: number;
+}
+
+/**
+ * Deletes the database. Our own connections close on the versionchange this
+ * causes; a connection that does not close makes it fail with `blocked`
+ * after the timeout (the deletion then still happens once it closes).
+ */
+export function deleteVaultDb(options: DeleteVaultOptions): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let blockedTimer: ReturnType<typeof setTimeout> | undefined;
+    const settle = (error: VaultError | null): void => {
+      clearTimeout(blockedTimer);
+      if (settled) return;
+      settled = true;
+      if (error === null) resolve();
+      else reject(error);
+    };
+    let request: IDBOpenDBRequest;
+    try {
+      request = options.idb.deleteDatabase(options.name ?? DB_NAME);
+    } catch (error) {
+      settle(toVaultError(error, 'unavailable'));
+      return;
+    }
+    request.onsuccess = () => {
+      settle(null);
+    };
+    request.onerror = () => {
+      settle(toVaultError(request.error, 'unavailable'));
+    };
+    request.onblocked = () => {
+      clearTimeout(blockedTimer);
+      blockedTimer = setTimeout(() => {
+        settle(new VaultError('blocked'));
+      }, options.blockedTimeoutMs ?? DEFAULT_BLOCKED_TIMEOUT_MS);
+    };
+  });
+}

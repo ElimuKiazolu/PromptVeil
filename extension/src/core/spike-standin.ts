@@ -12,3 +12,8 @@ const SPIKE_STAND_IN = /^standin\.\d+(?:\.[a-z0-9]{1,8})?@example\.net$/i;
 export function isSpikeStandIn(email: string): boolean {
   return SPIKE_STAND_IN.test(email.trim());
 }
+
+/** The spike stand-in with this number and tag (1–8 lowercase letters or digits). */
+export function spikeStandIn(number: number, tag: string): string {
+  return `standin.${number.toString()}.${tag}@example.net`;
+}

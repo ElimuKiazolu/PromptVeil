@@ -83,8 +83,11 @@ const EDIT_FORM = SELECTORS.editForm.join(', ');
 
 const HOSTNAME = 'chatgpt.com';
 
-/** Matches /c/<id>, also when nested under /g/<gpt-or-project>/. */
-const CONVERSATION_PATH = /(?:^|\/)c\/([A-Za-z0-9-]{8,})(?:\/|$)/;
+/**
+ * Matches /c/<id>, also when nested under /g/<gpt-or-project>/. IDs are
+ * 8–128 characters, the vault's ChatGPT format (src/shared/conversation-id.ts).
+ */
+const CONVERSATION_PATH = /(?:^|\/)c\/([A-Za-z0-9-]{8,128})(?:\/|$)/;
 
 /** ProseMirror adds this <br> to keep empty blocks open; it is not content. */
 const TRAILING_BREAK_CLASS = 'ProseMirror-trailingBreak';

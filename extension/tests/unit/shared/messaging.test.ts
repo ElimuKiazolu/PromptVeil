@@ -361,8 +361,12 @@ describe('createMessenger', () => {
 });
 
 describe('production protocol', () => {
-  it('is empty until a feature adds messages', () => {
-    expect(Object.keys(PROTOCOL)).toEqual([]);
+  it('has the vault messages', () => {
+    expect(Object.keys(PROTOCOL).sort()).toEqual([
+      'vault.load',
+      'vault.mask',
+      'vault.migrate',
+    ]);
   });
 
   it('accepts the WXT runtime as its runtime', () => {

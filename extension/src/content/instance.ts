@@ -17,6 +17,18 @@ export interface DraftHooks {
   dispose(): void;
 }
 
+/** The tab's vault session (see vault-session.ts) as the instance runs it. */
+export interface InstanceSession {
+  /** Starts following the conversation (URL, notices) until `signal` aborts. */
+  start(signal: AbortSignal): void;
+  /** Forget real values: the page is hidden. */
+  clear(): void;
+  /** The page is shown again from the back/forward cache. */
+  resume(): void;
+  /** The instance is over. */
+  dispose(): void;
+}
+
 export interface InstanceOptions {
   adapter: SiteAdapter;
   transform: PromptTransform;
@@ -30,6 +42,8 @@ export interface InstanceOptions {
   signal: AbortSignal;
   /** Analyses drafts while they are written, so Send finds the work done. */
   draft?: DraftHooks;
+  /** The conversation's mappings in the vault. */
+  session?: InstanceSession;
   target?: Window;
   heartbeatMs?: number;
 }
@@ -54,6 +68,7 @@ export function startInstance({
   isContextValid,
   signal,
   draft,
+  session,
   target = window,
   heartbeatMs = DEFAULT_HEARTBEAT_MS,
 }: InstanceOptions): void {
@@ -71,6 +86,7 @@ export function startInstance({
     controller.abort();
     clearInterval(heartbeat);
     draft?.dispose();
+    session?.dispose();
     devlog(reason === 'orphaned' ? 'instance.orphaned' : 'instance.superseded');
     installSendGuard(adapter, target);
   };
@@ -111,9 +127,30 @@ export function startInstance({
     );
   }
 
+  if (session !== undefined) {
+    session.start(controller.signal);
+    // Loaded real values are held only while the page is shown.
+    target.addEventListener(
+      'pagehide',
+      () => {
+        session.clear();
+      },
+      { signal: controller.signal },
+    );
+    target.addEventListener(
+      'pageshow',
+      (event) => {
+        if (event.persisted) session.resume();
+      },
+      { signal: controller.signal },
+    );
+  }
+
   // Real values go back into the page only while the net guards requests.
   net.onReady(() => {
     if (stopped) return;
+    // Mappings loaded before the net was ready reach it first.
+    net.sync(source.mappings());
     startRestorer({
       adapter,
       source,

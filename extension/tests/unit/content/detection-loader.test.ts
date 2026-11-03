@@ -7,7 +7,7 @@ import {
 import { startInstance } from '@/src/content/instance.ts';
 import type { NetBridge } from '@/src/content/net-bridge.ts';
 import type { DetectionRuntime } from '@/src/core/detect/bundle.ts';
-import { createSpikeMasker } from '@/src/core/spike-mask.ts';
+import { createMemoryMasker } from '../memory-masker.ts';
 import { detectEmailsOnly } from '../spike-detect.ts';
 import { flush, pressKey, setUp } from './harness.ts';
 
@@ -18,12 +18,13 @@ function fakeRuntime(): DetectionRuntime {
     clear: vi.fn(),
     dispose: vi.fn(),
     warmUp: () => Promise.resolve(),
+    normalise: (detection) => detection.value.toLowerCase(),
   };
 }
 
 function fakeModule(runtime: DetectionRuntime): DetectionModuleApi {
   return {
-    DETECTION_API_VERSION: 1,
+    DETECTION_API_VERSION: 2,
     createDetection: () => runtime,
   };
 }
@@ -130,7 +131,7 @@ describe('createLazyDetection', () => {
   it('rejects a module of another shape or version', async () => {
     for (const module of [
       {},
-      { DETECTION_API_VERSION: 2, createDetection: () => fakeRuntime() },
+      { DETECTION_API_VERSION: 1, createDetection: () => fakeRuntime() },
       null,
     ]) {
       const detection = createLazyDetection({
@@ -192,7 +193,7 @@ describe('a Send before detection is ready', () => {
       create: () => runtime,
       timeoutMs: 1000,
     });
-    const masker = createSpikeMasker({
+    const masker = createMemoryMasker({
       detect: async (text) => (await detection.ready()).analyse(text),
     });
     const controller = new AbortController();

@@ -22,11 +22,19 @@ function isStringOrNull(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
 }
 
+/**
+ * The built-in class of a value, also for objects from another realm
+ * (instanceof only recognises this realm's constructors).
+ */
+function classOf(value: unknown): string {
+  return Object.prototype.toString.call(value);
+}
+
 function isEncryptedValue(value: unknown): value is EncryptedValue {
   return (
     isObject(value) &&
-    value.iv instanceof Uint8Array &&
-    value.ct instanceof ArrayBuffer
+    classOf(value.iv) === '[object Uint8Array]' &&
+    classOf(value.ct) === '[object ArrayBuffer]'
   );
 }
 

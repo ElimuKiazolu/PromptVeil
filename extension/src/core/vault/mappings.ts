@@ -12,15 +12,15 @@ import type {
 } from '@/src/shared/entities.ts';
 import type { SiteId } from '@/src/shared/settings.ts';
 import {
-  decryptValue,
-  encryptValue,
+  decryptReal,
+  encryptReal,
   randomDateOffsetDays,
   realHash,
   type RecordBinding,
 } from './crypto.ts';
 import { requestResult, withTransaction } from './db.ts';
 import { VaultError } from './errors.ts';
-import { normaliseReal, normaliseStandIn } from './normalise.ts';
+import { normaliseStandIn } from './normalise.ts';
 import { isConversationRecord, isMappingRecord } from './records.ts';
 import { INDEX, STORE } from './schema.ts';
 import type {
@@ -42,6 +42,11 @@ export interface RealValue {
   subtype: EntitySubtype | null;
   country: CountryCode | null;
   value: string;
+  /**
+   * The value's vault normal form (normaliseReal), computed by the detection
+   * code that found it; mappings are found by its hash.
+   */
+  normalised: string;
 }
 
 export interface NewConversation {
@@ -91,12 +96,7 @@ async function hashOf(
     conversationId,
     type: real.type,
     subtype: real.subtype,
-    normalised: normaliseReal(
-      real.type,
-      real.subtype,
-      real.country,
-      real.value,
-    ),
+    normalised: real.normalised,
   });
 }
 
@@ -194,7 +194,7 @@ export type InsertResult =
   /** The stand-in is already used for another value; generate another one. */
   | { status: 'surrogate-taken' };
 
-function binding(mapping: {
+export function mappingBinding(mapping: {
   id: string;
   conversationId: string;
   type: EntityType;
@@ -229,11 +229,16 @@ export async function insertMapping(
     country: real.country,
     locale: input.locale,
     realHash: await hashOf(context, conversationId, real),
-    realEnc: await encryptValue(
+    realEnc: await encryptReal(
       context.crypto,
       context.keys.enc,
-      real.value,
-      binding({ id, conversationId, type: real.type, subtype: real.subtype }),
+      { value: real.value, normalised: real.normalised },
+      mappingBinding({
+        id,
+        conversationId,
+        type: real.type,
+        subtype: real.subtype,
+      }),
     ),
     surrogate: input.surrogate,
     surrogateNorm: normaliseStandIn(input.surrogate),
@@ -314,12 +319,12 @@ export async function loadConversation(
     }
     let real: string;
     try {
-      real = await decryptValue(
+      ({ value: real } = await decryptReal(
         context.crypto,
         context.keys.enc,
         record.realEnc,
-        binding(record),
-      );
+        mappingBinding(record),
+      ));
     } catch (error) {
       // Counted in `failed`; any other kind of error is not expected here.
       if (error instanceof VaultError && error.code === 'decrypt-failed') {

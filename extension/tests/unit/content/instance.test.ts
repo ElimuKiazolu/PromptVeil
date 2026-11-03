@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startInstance } from '@/src/content/instance.ts';
 import type { NetBridge } from '@/src/content/net-bridge.ts';
 import type { PromptTransform } from '@/src/content/interceptor.ts';
-import { createSpikeMasker } from '@/src/core/spike-mask.ts';
+import { createMemoryMasker } from '../memory-masker.ts';
 import { detectEmailsOnly } from '../spike-detect.ts';
 import { flush, pressKey, setUp, type Harness } from './harness.ts';
 
@@ -32,7 +32,7 @@ describe('startInstance', () => {
     transform?: PromptTransform,
     net: NetBridge = readyNet,
   ): TestInstance => {
-    const masker = createSpikeMasker({ detect: detectEmailsOnly });
+    const masker = createMemoryMasker({ detect: detectEmailsOnly });
     let valid = true;
     const instance: TestInstance = {
       frameworkAbort: new AbortController(),
@@ -111,7 +111,7 @@ describe('startInstance', () => {
   it('does not send when the context is lost mid-send', async () => {
     const instance: TestInstance = start((text) => {
       instance.setContextValid(false);
-      return createSpikeMasker({ detect: detectEmailsOnly }).transform(text);
+      return createMemoryMasker({ detect: detectEmailsOnly }).transform(text);
     });
     h.editor.textContent = 'Test dana@example.com';
     pressKey(h.editor, { key: 'Enter' });
@@ -271,7 +271,7 @@ describe('startInstance: draft pre-pass', () => {
     draft.prepare.mockClear();
     draft.clear.mockClear();
     draft.dispose.mockClear();
-    const masker = createSpikeMasker({ detect: detectEmailsOnly });
+    const masker = createMemoryMasker({ detect: detectEmailsOnly });
     startInstance({
       adapter: h.adapter,
       transform: masker.transform,
@@ -310,5 +310,88 @@ describe('startInstance: draft pre-pass', () => {
     h.editor.dispatchEvent(new Event('input', { bubbles: true }));
     vi.advanceTimersByTime(300);
     expect(draft.prepare).not.toHaveBeenCalled();
+  });
+});
+
+describe('startInstance with a vault session', () => {
+  const fakeSession = () => ({
+    start: vi.fn<(signal: AbortSignal) => void>(),
+    clear: vi.fn(),
+    resume: vi.fn(),
+    dispose: vi.fn(),
+  });
+
+  it('runs the session with the page: hidden, shown again, stopped', () => {
+    const h = setUp();
+    const session = fakeSession();
+    const frameworkAbort = new AbortController();
+    const masker = createMemoryMasker({ detect: detectEmailsOnly });
+    startInstance({
+      adapter: h.adapter,
+      transform: masker.transform,
+      source: masker.source,
+      net: readyNet,
+      isContextValid: () => true,
+      signal: frameworkAbort.signal,
+      session,
+    });
+    expect(session.start).toHaveBeenCalledTimes(1);
+    const [signal] = session.start.mock.calls[0] ?? [];
+
+    window.dispatchEvent(new PageTransitionEvent('pagehide'));
+    expect(session.clear).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(
+      new PageTransitionEvent('pageshow', { persisted: false }),
+    );
+    expect(session.resume).not.toHaveBeenCalled();
+    window.dispatchEvent(
+      new PageTransitionEvent('pageshow', { persisted: true }),
+    );
+    expect(session.resume).toHaveBeenCalledTimes(1);
+
+    frameworkAbort.abort();
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it('gives the net the mappings loaded before it was ready, then restores', () => {
+    const h = setUp();
+    const synced: string[][] = [];
+    const waiting: (() => void)[] = [];
+    let isReady = false;
+    const net: NetBridge = {
+      isReady: () => isReady,
+      onReady: (callback) => {
+        waiting.push(callback);
+      },
+      sync: (mappings) => {
+        synced.push(mappings.map((mapping) => mapping.real));
+      },
+    };
+    const source = {
+      version: 1,
+      mappings: () => [
+        {
+          standIn: 'standin.1@example.net',
+          real: 'dana@example.com',
+          boundary: 'email' as const,
+        },
+      ],
+      subscribe: () => () => undefined,
+    };
+    const frameworkAbort = new AbortController();
+    startInstance({
+      adapter: h.adapter,
+      transform: (text) => text,
+      source,
+      net,
+      isContextValid: () => true,
+      signal: frameworkAbort.signal,
+    });
+    expect(synced).toEqual([]);
+    isReady = true;
+    for (const callback of waiting.splice(0)) callback();
+    expect(synced).toEqual([['dana@example.com']]);
+    frameworkAbort.abort();
   });
 });

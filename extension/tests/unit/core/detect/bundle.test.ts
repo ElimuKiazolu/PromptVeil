@@ -9,7 +9,7 @@ const immediate: Yielder = { now: () => 0, yieldNow: () => Promise.resolve() };
 
 describe('detection module entry', () => {
   it('has the interface version the content script checks', () => {
-    expect(DETECTION_API_VERSION).toBe(1);
+    expect(DETECTION_API_VERSION).toBe(2);
   });
 
   it('detects with the configured types and packs, honouring idPacks', async () => {
@@ -35,6 +35,26 @@ describe('detection module entry', () => {
     runtime.clear();
     runtime.dispose();
     await expect(runtime.analyse('x')).rejects.toThrow();
+  });
+
+  it('gives the vault normal form of a detection', async () => {
+    const runtime = createDetection(
+      {
+        homeRegions: ['GB'],
+        preferredRegions: [],
+        entityTypes: new Set(['EMAIL', 'PHONE']),
+        idPacks: {},
+      },
+      immediate,
+    );
+    // Ofcom drama range number, written nationally.
+    const [email, phone] = await runtime.analyse(
+      'Dana.Whitfield@Example.COM or 020 7946 0123',
+    );
+    if (email === undefined || phone === undefined) throw new Error('missed');
+    expect(runtime.normalise(email)).toBe('dana.whitfield@example.com');
+    expect(runtime.normalise(phone)).toBe('+442079460123');
+    runtime.dispose();
   });
 
   it('warms up through the checkpoint', async () => {

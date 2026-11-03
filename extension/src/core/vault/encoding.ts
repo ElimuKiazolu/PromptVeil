@@ -41,3 +41,35 @@ export function toBase64(bytes: Uint8Array): string {
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
 }
+
+const decoder = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * The fields of an encodeFields result, or null when the bytes are not
+ * exactly one well-formed field list (truncated, trailing bytes, unknown
+ * tag, invalid UTF-8).
+ */
+export function decodeFields(bytes: Uint8Array): (string | null)[] | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const fields: (string | null)[] = [];
+  let offset = 0;
+  while (offset < bytes.length) {
+    const tag = bytes[offset];
+    if (tag === 0) {
+      fields.push(null);
+      offset += 1;
+      continue;
+    }
+    if (tag !== 1 || offset + 5 > bytes.length) return null;
+    const length = view.getUint32(offset + 1);
+    const start = offset + 5;
+    if (start + length > bytes.length) return null;
+    try {
+      fields.push(decoder.decode(bytes.subarray(start, start + length)));
+    } catch {
+      return null;
+    }
+    offset = start + length;
+  }
+  return fields;
+}
