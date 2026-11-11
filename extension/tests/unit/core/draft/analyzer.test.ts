@@ -179,12 +179,10 @@ describe('rules analysis', () => {
       yielder: immediate,
       onClear: clearRuleCaches,
     });
-    const detections = await analyzer.analyse(
-      'dana@example.com, 020 7946 0018',
-    );
+    const detections = await analyzer.analyse('dana@example.com, 07400 123456');
     expect(detections.map((d) => [d.type, d.value])).toEqual([
       ['EMAIL', 'dana@example.com'],
-      ['PHONE', '020 7946 0018'],
+      ['PHONE', '07400 123456'],
     ]);
     analyzer.dispose();
   });

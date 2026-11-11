@@ -16,7 +16,7 @@
     "nationalId": {
       "type": "SSN",
       "value": "987-65-4321",
-      "source": "Reserved, not issuable — must be rejected. SSA reserves 987-65-4320 to 987-65-4329 for use in advertising and fiction."
+      "source": "Reserved, not issuable — must be rejected. Area numbers 900–999 are never assigned (SSA, SSN randomization FAQ); 987-65-4320 to 987-65-4329 are widely cited as advertising numbers."
     },
     "validExample": {
       "type": "SSN",

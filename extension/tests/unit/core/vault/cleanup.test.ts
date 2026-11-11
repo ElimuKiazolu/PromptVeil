@@ -1,7 +1,6 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import { deleteExpired, LOG_RETENTION_DAYS } from '@/src/core/vault/cleanup.ts';
-import { maskValues } from '@/src/core/vault/mask.ts';
 import type { VaultContext } from '@/src/core/vault/mappings.ts';
 import { STORE } from '@/src/core/vault/schema.ts';
 import { createVaultService } from '@/src/core/vault/service.ts';
@@ -9,6 +8,7 @@ import {
   clearRaw,
   dumpAll,
   getRaw,
+  maskValues,
   openV1,
   putRaw,
   readyContext,

@@ -20,9 +20,11 @@ import {
 } from './rules/analysis.ts';
 import { COUNTRY_PACKS, enabledPacks } from './rules/packs/index.ts';
 import type { Checkpoint, Yielder } from './schedule.ts';
+import { generateStandIn } from '../surrogate/engine.ts';
+import type { StandIn, StandInRequest } from '../surrogate/types.ts';
 
 /** Changes whenever the module's exports change shape. */
-export const DETECTION_API_VERSION = 2;
+export const DETECTION_API_VERSION = 3;
 
 export interface DetectionConfig {
   readonly homeRegions: readonly CountryCode[];
@@ -46,6 +48,16 @@ export interface DetectionRuntime {
   warmUp(checkpoint: Checkpoint): Promise<void>;
   /** The vault normal form of a detected value (sent with it to the vault). */
   normalise(detection: Detection): string;
+  /**
+   * The stand-in engine: the stand-in for a value, its seed (from the
+   * vault) and an attempt number; null when this attempt has none. Throws
+   * for a type without a generator.
+   */
+  standIn(
+    request: StandInRequest,
+    seed: Uint8Array,
+    attempt: number,
+  ): StandIn | null;
 }
 
 export function createDetection(
@@ -79,5 +91,6 @@ export function createDetection(
         detection.country,
         detection.value,
       ),
+    standIn: generateStandIn,
   };
 }

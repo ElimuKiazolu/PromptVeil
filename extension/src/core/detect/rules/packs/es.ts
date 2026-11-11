@@ -98,6 +98,8 @@ export const ES_PACK: CountryPack = {
       ],
       checksum: 'mod23-letter',
       checkCharacters: dniCheckLetter,
+      // No issuance rules beyond the format and the check letter.
+      isWellFormed: isValidDni,
       isValid: isValidDni,
       avoid: ['keep DNI vs NIE (and the NIE prefix letter) as written'],
     },

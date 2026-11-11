@@ -32,9 +32,15 @@ function compactNino(value: string): string | null {
   return spaced === null ? null : spaced.slice(1).join('');
 }
 
+/** Format only: two letters, six digits, a suffix A–D. */
+export function isWellFormedNino(value: string): boolean {
+  return compactNino(value) !== null;
+}
+
 export function isValidNino(value: string): boolean {
   const nino = compactNino(value);
   if (nino === null) return false;
+  // Issuance rules: letters and prefixes never allocated (NIM39110).
   const first = nino.charAt(0);
   const second = nino.charAt(1);
   if (NOT_PREFIX_LETTER.has(first) || NOT_PREFIX_LETTER.has(second))
@@ -96,10 +102,22 @@ export function nhsCheckDigit(payload: string): string | null {
   return check === 11 ? '0' : check.toString();
 }
 
+/** Format and checksum: ten digits ending in the modulus 11 check digit. */
+export function isWellFormedNhsNumber(value: string): boolean {
+  const read = groupedDigits(value, NHS_GROUPS);
+  if (read === null) return false;
+  return nhsCheckDigit(read.digits.slice(0, 9)) === read.digits.charAt(9);
+}
+
+/**
+ * Valid NHS number. The test range 999 000 0000–999 999 9999 is valid (and
+ * detected): NHS England never issues it to patients, but synthetic records
+ * in live systems use it.
+ */
 export function isValidNhsNumber(value: string): boolean {
   const read = groupedDigits(value, NHS_GROUPS);
   if (read === null || isRepeatedDigit(read.digits)) return false;
-  return nhsCheckDigit(read.digits.slice(0, 9)) === read.digits.charAt(9);
+  return isWellFormedNhsNumber(value);
 }
 
 export const UK_NHS_RULE: Rule = {
@@ -132,6 +150,7 @@ export const GB_PACK: CountryPack = {
       formats: ['AA######A', 'AA ## ## ## A'],
       checksum: null,
       checkCharacters: null,
+      isWellFormed: isWellFormedNino,
       isValid: isValidNino,
       avoid: [
         'prefix letters D, F, I, Q, U, V; second letter O',
@@ -143,12 +162,9 @@ export const GB_PACK: CountryPack = {
       formats: ['### ### ####', '###-###-####', '##########'],
       checksum: 'weighted-mod11',
       checkCharacters: nhsCheckDigit,
+      isWellFormed: isWellFormedNhsNumber,
       isValid: isValidNhsNumber,
-      avoid: [
-        'payloads whose check value is 10',
-        'all digits the same',
-        '999 000 0000 to 999 999 9999 is the test range (valid, never issued)',
-      ],
+      avoid: ['all digits the same'],
     },
   },
 };

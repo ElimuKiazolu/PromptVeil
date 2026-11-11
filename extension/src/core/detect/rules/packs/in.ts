@@ -44,6 +44,18 @@ function isVerhoeffNumber(digits: string): boolean {
   );
 }
 
+/** Format and checksum: twelve digits ending in a Verhoeff check digit. */
+export function isWellFormedAadhaar(value: string): boolean {
+  const read = groupedDigits(value, AADHAAR_GROUPS);
+  return read !== null && isValidVerhoeff(read.digits);
+}
+
+/** Format and checksum: sixteen digits ending in a Verhoeff check digit. */
+export function isWellFormedVid(value: string): boolean {
+  const read = groupedDigits(value, VID_GROUPS);
+  return read !== null && isValidVerhoeff(read.digits);
+}
+
 export function isValidAadhaar(value: string): boolean {
   const read = groupedDigits(value, AADHAAR_GROUPS);
   return read !== null && isVerhoeffNumber(read.digits);
@@ -116,6 +128,11 @@ export const IN_VID_RULE: Rule = {
 const PAN_HOLDER_TYPES = 'PCHFATBLJG';
 const PAN_FORMAT = /^[A-Z]{3}([A-Z])[A-Z](\d{4})[A-Z]$/u;
 
+/** Format only: five letters, four digits, a letter (no published check). */
+export function isWellFormedPan(value: string): boolean {
+  return PAN_FORMAT.test(value);
+}
+
 export function isValidPan(value: string): boolean {
   const parts = PAN_FORMAT.exec(value);
   if (parts === null) return false;
@@ -168,6 +185,7 @@ export const IN_PACK: CountryPack = {
       formats: ['#### #### ####', '####-####-####', '############'],
       checksum: 'verhoeff',
       checkCharacters: verhoeffCharacter,
+      isWellFormed: isWellFormedAadhaar,
       isValid: isValidAadhaar,
       avoid: ['first digit 0 or 1', 'palindromes'],
     },
@@ -175,6 +193,7 @@ export const IN_PACK: CountryPack = {
       formats: ['#### #### #### ####', '################'],
       checksum: 'verhoeff',
       checkCharacters: verhoeffCharacter,
+      isWellFormed: isWellFormedVid,
       isValid: isValidVid,
       avoid: ['first digit 0 or 1', 'palindromes'],
     },
@@ -182,6 +201,7 @@ export const IN_PACK: CountryPack = {
       formats: ['AAAAA####A'],
       checksum: null,
       checkCharacters: null,
+      isWellFormed: isWellFormedPan,
       isValid: isValidPan,
       avoid: [
         'fourth letter other than P, C, H, F, A, T, B, L, J, G (keep the real one)',

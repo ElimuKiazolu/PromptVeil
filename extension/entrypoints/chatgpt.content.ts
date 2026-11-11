@@ -6,10 +6,7 @@ import { vaultLifecycle } from '@/src/content/vault-lifecycle.ts';
 import { createVaultSession } from '@/src/content/vault-session.ts';
 import { createMainThreadYielder } from '@/src/content/yielder.ts';
 import { createCheckpoint } from '@/src/core/detect/schedule.ts';
-import {
-  SPIKE_ENTITY_TYPES,
-  createSpikeMasker,
-} from '@/src/core/spike-mask.ts';
+import { LIVE_ENTITY_TYPES, createMasker } from '@/src/core/masker.ts';
 import { regionsFromLanguages } from '@/src/shared/country.ts';
 import { devlog } from '@/src/shared/devlog.ts';
 import { isExtensionContextValid } from '@/src/shared/extension-context.ts';
@@ -61,7 +58,7 @@ export default defineContentScript({
           {
             homeRegions: languageRegions,
             preferredRegions: languageRegions,
-            entityTypes: SPIKE_ENTITY_TYPES,
+            entityTypes: LIVE_ENTITY_TYPES,
             idPacks: DEFAULT_SETTINGS.idPacks,
           },
           yielder,
@@ -77,14 +74,20 @@ export default defineContentScript({
       },
       randomUUID: () => crypto.randomUUID(),
     });
-    const masker = createSpikeMasker({
+    const masker = createMasker({
       // A Send before the module is ready waits for it; if it cannot load,
       // the transform rejects and the Send is blocked.
       detect: async (text) => (await detection.ready()).analyse(text),
       normalise: async (found) => (await detection.ready()).normalise(found),
+      engine: async () => {
+        const runtime = await detection.ready();
+        return (request, seed, attempt) =>
+          runtime.standIn(request, seed, attempt);
+      },
       // Any vault failure rejects, and the Send is blocked.
-      issue: (items) => session.mask(items),
+      mask: (items, issue) => session.mask(items, issue),
       isIssued: (value) => session.isIssued(value),
+      entityTypes: LIVE_ENTITY_TYPES,
     });
     startInstance({
       adapter,

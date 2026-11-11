@@ -363,9 +363,10 @@ describe('createMessenger', () => {
 describe('production protocol', () => {
   it('has the vault messages', () => {
     expect(Object.keys(PROTOCOL).sort()).toEqual([
+      'vault.commit',
       'vault.load',
-      'vault.mask',
       'vault.migrate',
+      'vault.prepare',
     ]);
   });
 

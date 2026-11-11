@@ -43,6 +43,13 @@ export function nirKey(first13: string): string | null {
   return (97 - remainder).toString().padStart(2, '0');
 }
 
+/** Format and checksum: the written form and the key. */
+export function isWellFormedNir(value: string): boolean {
+  const nir = compactNir(value);
+  return nir !== null && nirKey(nir.slice(0, 13)) === nir.slice(13);
+}
+
+/** Adds the issuance rules: sex, month, department, commune and order codes. */
 export function isValidNir(value: string): boolean {
   const nir = compactNir(value);
   if (nir === null || !SEXES.includes(nir.charAt(0))) return false;
@@ -99,6 +106,7 @@ export const FR_PACK: CountryPack = {
       formats: ['###############', '# ## ## ## ### ### ##', '#####2A########'],
       checksum: 'iso7064-mod97-10',
       checkCharacters: nirKey,
+      isWellFormed: isWellFormedNir,
       isValid: isValidNir,
       avoid: [
         'sex digits other than 1, 2, 3, 4, 7, 8 (keep the real one)',

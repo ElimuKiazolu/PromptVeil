@@ -17,12 +17,18 @@ import type { CountryPack } from './index.ts';
 
 const GROUPS = [3, 3, 3] as const;
 
+/** Format and checksum: nine digits passing Luhn. */
+export function isWellFormedSin(value: string): boolean {
+  const read = groupedDigits(value, GROUPS);
+  return read !== null && isValidLuhn(read.digits);
+}
+
 export function isValidSin(value: string): boolean {
   const read = groupedDigits(value, GROUPS);
   if (read === null) return false;
   const first = read.digits.charAt(0);
   if (first === '0' || first === '8') return false;
-  return isValidLuhn(read.digits);
+  return isWellFormedSin(value);
 }
 
 function sinCheckDigit(payload: string): string | null {
@@ -70,6 +76,7 @@ export const CA_PACK: CountryPack = {
       formats: ['### ### ###', '###-###-###', '#########'],
       checksum: 'luhn',
       checkCharacters: sinCheckDigit,
+      isWellFormed: isWellFormedSin,
       isValid: isValidSin,
       avoid: [
         'first digit 0 (CRA tax numbers) or 8 (business numbers)',

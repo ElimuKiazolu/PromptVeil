@@ -91,7 +91,8 @@ describe('findPhoneCandidates: shapes that are something else', () => {
 describe('PHONE_RULE.validate', () => {
   it('confirms a number valid in a home region', async () => {
     await expect(
-      PHONE_RULE.validate('020 7946 0018', env(['GB'])),
+      // libphonenumber's example UK mobile number.
+      PHONE_RULE.validate('07400 123456', env(['GB'])),
     ).resolves.toMatchObject({
       valid: true,
       country: 'GB',
@@ -102,7 +103,7 @@ describe('PHONE_RULE.validate', () => {
 
   it('confirms an international number', async () => {
     await expect(
-      PHONE_RULE.validate('+44 20 7946 0018', env(['US'])),
+      PHONE_RULE.validate('+44 7400 123456', env(['US'])),
     ).resolves.toMatchObject({
       valid: true,
       country: 'GB',
@@ -183,7 +184,7 @@ describe('timestamps are not phone numbers', () => {
   const detect = async (text: string) =>
     (
       await detectRules(text, {
-        homeRegions: ['US'],
+        homeRegions: ['LA'],
         entityTypes: new Set(['PHONE']),
         packs: [],
         exclude: [],
@@ -191,12 +192,12 @@ describe('timestamps are not phone numbers', () => {
     ).map((d) => d.value);
 
   it.each([
-    '"created_at": 2015550143,',
-    'updated_at=2015550143',
-    'expires 2015550143',
-    '{"iat": 2015550143, "exp": 2015550200}',
-    'ts: 2015550143000',
-    'f(2015550143)',
+    '"created_at": 2023123456,',
+    'updated_at=2023123456',
+    'expires 2023123456',
+    '{"iat": 2023123456, "exp": 2023123500}',
+    'ts: 2023123456000',
+    'f(2023123456)',
   ])(
     'skips a plausible Unix time in code or next to a time key: %s',
     async (text) => {
@@ -205,9 +206,9 @@ describe('timestamps are not phone numbers', () => {
   );
 
   it('still finds the same digits with a phone word nearby', async () => {
-    // 201 555 0143: NANP 555-01xx fictional number; as Unix seconds, 2033.
-    expect(await detect('phone: 2015550143,')).toEqual(['2015550143']);
-    expect(await detect('Call me at 2015550143')).toEqual(['2015550143']);
+    // libphonenumber's example Laos mobile number; as Unix seconds, 2034.
+    expect(await detect('phone: 2023123456,')).toEqual(['2023123456']);
+    expect(await detect('Call me at 2023123456')).toEqual(['2023123456']);
   });
 
   it('ignores runs outside 2000–2040 or of other lengths', () => {
@@ -231,8 +232,54 @@ describe('shared calling codes', () => {
   });
 
   it('ranks a reading from a region sharing the home calling code first', async () => {
-    // libphonenumber's example US number, read with home CA: US (+1) is near home.
-    const verdict = await PHONE_RULE.validate('201 555 0123', env(['CA']));
-    expect(verdict.valid && verdict.country).toBe('US');
+    // libphonenumber's example Dominican Republic number, read with home
+    // US: DO (+1) is near home.
+    const verdict = await PHONE_RULE.validate('809 234 5678', env(['US']));
+    expect(verdict.valid && verdict.country).toBe('DO');
+  });
+});
+
+describe('numbers reserved for fiction are not detected', () => {
+  const detect = async (text: string, home: CountryCode) =>
+    (
+      await detectRules(text, {
+        homeRegions: [home],
+        entityTypes: new Set(['PHONE']),
+        packs: [],
+        exclude: [],
+      })
+    ).map((d) => d.value);
+
+  it.each([
+    // NANPA 555-0100 to 555-0199, any area code.
+    ['Call (202) 555-0143 now', 'US'],
+    ['Call +1 416 555 0199 now', 'GB'],
+    // Ofcom drama ranges (mobile, London, no-area, freephone).
+    ['Call 07700 900123 now', 'GB'],
+    ['Call +44 7700 900123 now', 'US'],
+    ['Call 020 7946 0018 now', 'GB'],
+    ['Call 01632 960123 now', 'GB'],
+    ['Call 08081 570123 now', 'GB'],
+    // Arcep roots for audiovisual works.
+    ['Appelez le 01 99 00 12 34', 'FR'],
+    ['Appelez le 06 39 98 12 34', 'FR'],
+    // ACMA geographic blocks.
+    ['Call (02) 5550 1234 now', 'AU'],
+    ['Call 08 7010 9876 now', 'AU'],
+  ] as const)('%s (home %s)', async (text, home) => {
+    expect(await detect(text, home)).toEqual([]);
+  });
+
+  it('still detects the numbers next to the ranges', async () => {
+    // libphonenumber's example numbers.
+    expect(await detect('Call (506) 234-5678 now', 'CA')).toEqual([
+      '(506) 234-5678',
+    ]);
+    expect(await detect('Call 07400 123456 now', 'GB')).toEqual([
+      '07400 123456',
+    ]);
+    expect(await detect('Appelez le 01 23 45 67 89', 'FR')).toEqual([
+      '01 23 45 67 89',
+    ]);
   });
 });

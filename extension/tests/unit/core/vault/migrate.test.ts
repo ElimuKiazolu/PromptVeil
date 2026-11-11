@@ -1,6 +1,5 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
-import { maskValues } from '@/src/core/vault/mask.ts';
 import {
   findByReal,
   loadConversation,
@@ -17,6 +16,8 @@ import {
   codeOf,
   dumpAll,
   getRaw,
+  maskValues,
+  numbered,
   openV1,
   putRaw,
   readyContext,
@@ -226,7 +227,7 @@ describe('pending chat migration', () => {
           }),
         ],
       },
-      () => last.surrogate,
+      numbered(() => last.surrogate),
     );
     const before = await dumpAll(context.db);
 

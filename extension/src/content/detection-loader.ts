@@ -10,7 +10,7 @@ import { devlog } from '@/src/shared/devlog.ts';
  * code is part of the document_start script.
  */
 export interface DetectionModuleApi {
-  DETECTION_API_VERSION: 2;
+  DETECTION_API_VERSION: 3;
   createDetection: typeof createDetection;
 }
 
@@ -55,7 +55,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 function isDetectionModule(value: unknown): value is DetectionModuleApi {
   return (
     isRecord(value) &&
-    value.DETECTION_API_VERSION === 2 &&
+    value.DETECTION_API_VERSION === 3 &&
     typeof value.createDetection === 'function'
   );
 }

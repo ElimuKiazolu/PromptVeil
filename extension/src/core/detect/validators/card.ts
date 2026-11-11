@@ -25,7 +25,7 @@ export type CardBrand =
 export type CardValidation =
   { valid: true; brand: CardBrand; digits: string } | { valid: false };
 
-interface PrefixRange {
+export interface PrefixRange {
   brand: CardBrand;
   /** Inclusive range of prefixes with the same number of digits. */
   from: string;
@@ -45,7 +45,8 @@ const range = (
 
 const SIXTEEN_TO_NINETEEN = [16, 17, 18, 19];
 
-const RANGES: readonly PrefixRange[] = [
+/** Brand prefixes (IIN ranges) and the lengths each brand issues. */
+export const CARD_PREFIX_RANGES: readonly PrefixRange[] = [
   range('visa', '4', '4', [13, 16, 19]),
   range('mastercard', '51', '55', [16]),
   range('mastercard', '2221', '2720', [16]),
@@ -78,7 +79,7 @@ const RANGES: readonly PrefixRange[] = [
 /** Brand of a digit string by longest matching prefix at a valid length. */
 export function cardBrand(digits: string): CardBrand | null {
   let best: PrefixRange | null = null;
-  for (const candidate of RANGES) {
+  for (const candidate of CARD_PREFIX_RANGES) {
     const prefix = digits.slice(0, candidate.from.length);
     if (prefix.length < candidate.from.length) continue;
     if (prefix < candidate.from || prefix > candidate.to) continue;

@@ -36,6 +36,23 @@ function isBirthDate(digits: string, today: Date): boolean {
   );
 }
 
+/**
+ * Format and checksum: thirteen digits starting with a calendar date (in
+ * either century) and ending in the Luhn check digit.
+ */
+export function isWellFormedZaId(value: string): boolean {
+  const digits = idDigits(value);
+  if (digits === null) return false;
+  const yy = Number(digits.slice(0, 2));
+  const month = Number(digits.slice(2, 4));
+  const day = Number(digits.slice(4, 6));
+  return (
+    [2000 + yy, 1900 + yy].some((year) => isCalendarDate(year, month, day)) &&
+    isValidLuhn(digits)
+  );
+}
+
+/** Adds the issuance rules: not born in the future, citizenship 0, 1 or 2. */
 export function isValidZaId(value: string, today: Date = new Date()): boolean {
   const digits = idDigits(value);
   if (digits === null || !isBirthDate(digits, today)) return false;
@@ -93,6 +110,7 @@ export const ZA_PACK: CountryPack = {
       formats: ['#############', '###### #######', '###### #### ## #'],
       checksum: 'luhn',
       checkCharacters: zaCheckDigit,
+      isWellFormed: isWellFormedZaId,
       isValid: (value) => isValidZaId(value),
       avoid: [
         'birth dates that are not real or in the future',

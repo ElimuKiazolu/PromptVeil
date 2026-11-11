@@ -81,6 +81,54 @@ function setUp(): Setup {
   };
 }
 
+let issuedCount = 0;
+
+/**
+ * Masks as the content script does: prepare, a numbered stand-in for each
+ * new value, commit. Returns the stand-ins.
+ */
+async function maskVia(
+  tab: Messenger<Protocol>,
+  conversationId: string,
+  items: MaskItem[],
+): Promise<string[]> {
+  const prepared = await tab.send('vault.prepare', { conversationId, items });
+  if (!prepared.ok || prepared.value.status !== 'ok') {
+    throw new Error('not prepared');
+  }
+  const standIns: string[] = [];
+  for (const [index, value] of prepared.value.items.entries()) {
+    const item = items[index];
+    if (item === undefined) throw new Error('missing item');
+    if (value.kind === 'existing') {
+      standIns.push(value.standIn);
+      continue;
+    }
+    // Unique across conversations, so a migration never meets a clash.
+    issuedCount += 1;
+    const standIn = `standin.${issuedCount.toString()}.test@example.net`;
+    const committed = await tab.send('vault.commit', {
+      conversationId,
+      entries: [{ item, standIn, standInNormalised: standIn }],
+    });
+    if (!committed.ok || committed.value.status !== 'ok') {
+      throw new Error('not committed');
+    }
+    const [outcome] = committed.value.items;
+    if (outcome === undefined || outcome.kind === 'taken') {
+      throw new Error('taken');
+    }
+    standIns.push(outcome.standIn);
+  }
+  return standIns;
+}
+
+const entry = (item: MaskItem, standIn: string) => ({
+  item,
+  standIn,
+  standInNormalised: standIn,
+});
+
 /** Lets fire-and-forget notices arrive. */
 const settle = () =>
   new Promise<void>((resolve) => {
@@ -127,7 +175,13 @@ describe('sender checks', () => {
       CONV_ID,
     ]) {
       expect(
-        await tab.send('vault.mask', { conversationId, items: [DANA] }),
+        await tab.send('vault.prepare', { conversationId, items: [DANA] }),
+      ).toEqual({ ok: true, value: forbidden });
+      expect(
+        await tab.send('vault.commit', {
+          conversationId,
+          entries: [entry(DANA, 'standin.1@example.net')],
+        }),
       ).toEqual({ ok: true, value: forbidden });
       expect(await tab.send('vault.load', { conversationId })).toEqual({
         ok: true,
@@ -136,9 +190,15 @@ describe('sender checks', () => {
     }
     for (const client of [iframe, other]) {
       expect(
-        await client.send('vault.mask', {
+        await client.send('vault.prepare', {
           conversationId: CONV,
           items: [DANA],
+        }),
+      ).toEqual({ ok: true, value: forbidden });
+      expect(
+        await client.send('vault.commit', {
+          conversationId: CONV,
+          entries: [entry(DANA, 'standin.1@example.net')],
         }),
       ).toEqual({ ok: true, value: forbidden });
       expect(await client.send('vault.load', { conversationId: CONV })).toEqual(
@@ -178,18 +238,32 @@ describe('sender checks', () => {
     const { ext, client } = setUp();
     const tab = client(ext.openTab(URL_CONV));
     expect(
-      await tab.send('vault.mask', {
+      await tab.send('vault.prepare', {
         conversationId: CONV,
         items: Array.from({ length: 201 }, () => DANA),
       }),
     ).toEqual({ ok: false, error: 'rejected' });
     expect(
-      await tab.send('vault.mask', { conversationId: CONV, items: [] }),
+      await tab.send('vault.prepare', { conversationId: CONV, items: [] }),
     ).toEqual({ ok: false, error: 'rejected' });
     expect(
-      await tab.send('vault.mask', {
+      await tab.send('vault.prepare', {
         conversationId: CONV,
         items: [{ ...DANA, normalised: '' }],
+      }),
+    ).toEqual({ ok: false, error: 'rejected' });
+    expect(
+      await tab.send('vault.commit', {
+        conversationId: CONV,
+        entries: Array.from({ length: 201 }, () =>
+          entry(DANA, 'standin.1@example.net'),
+        ),
+      }),
+    ).toEqual({ ok: false, error: 'rejected' });
+    expect(
+      await tab.send('vault.commit', {
+        conversationId: CONV,
+        entries: [{ ...entry(DANA, 'standin.1@example.net'), standIn: '' }],
       }),
     ).toEqual({ ok: false, error: 'rejected' });
   });
@@ -199,18 +273,43 @@ describe('vault requests', () => {
   it('masks, reuses and loads a conversation for the asking tab', async () => {
     const { ext, client } = setUp();
     const tab = client(ext.openTab(URL_CONV));
-    const first = await tab.send('vault.mask', {
+    const prepared = await tab.send('vault.prepare', {
       conversationId: CONV,
       items: [DANA],
     });
-    if (!first.ok || first.value.status !== 'ok') throw new Error('not masked');
-    const [standIn] = first.value.standIns;
+    if (!prepared.ok || prepared.value.status !== 'ok') {
+      throw new Error('not prepared');
+    }
+    // A seed of 32 bytes (base64) and the conversation's date offset.
+    const [first] = prepared.value.items;
+    if (first?.kind !== 'new') throw new Error('expected a new value');
+    expect(first.seed).toMatch(/^[A-Za-z0-9+/]{43}=$/u);
+    expect(first.number).toBe(1);
+    expect(Math.abs(prepared.value.dateOffsetDays)).toBeGreaterThanOrEqual(30);
+    const [standIn = ''] = await maskVia(tab, CONV, [DANA]);
     expect(
-      await tab.send('vault.mask', {
+      await tab.send('vault.prepare', {
         conversationId: CONV,
         items: [{ ...DANA, value: 'dana.whitfield@EXAMPLE.com' }],
       }),
-    ).toEqual({ ok: true, value: { status: 'ok', standIns: [standIn] } });
+    ).toEqual({
+      ok: true,
+      value: {
+        status: 'ok',
+        dateOffsetDays: prepared.value.dateOffsetDays,
+        items: [{ kind: 'existing', standIn }],
+      },
+    });
+    // A stand-in used for one value is taken for another.
+    expect(
+      await tab.send('vault.commit', {
+        conversationId: CONV,
+        entries: [entry(ROBIN, standIn)],
+      }),
+    ).toEqual({
+      ok: true,
+      value: { status: 'ok', items: [{ kind: 'taken' }] },
+    });
     expect(await tab.send('vault.load', { conversationId: CONV })).toEqual({
       ok: true,
       value: {
@@ -230,7 +329,11 @@ describe('vault requests', () => {
     const toOther = notices(otherTab);
     const tab = client(senderTab);
 
-    await tab.send('vault.mask', { conversationId: CONV, items: [DANA] });
+    // Preparing stores nothing: no notice yet.
+    await tab.send('vault.prepare', { conversationId: CONV, items: [DANA] });
+    await settle();
+    expect(toOther).toEqual([]);
+    await maskVia(tab, CONV, [DANA]);
     await settle();
     expect(toOther).toEqual([{ name: 'vault.changed', conversationId: CONV }]);
     expect(toSender).toEqual([]);
@@ -240,8 +343,8 @@ describe('vault requests', () => {
     expect(JSON.stringify(ext.sentToTabs)).not.toContain(DANA.value);
 
     // A reuse adds nothing, and a pending chat is the sender's alone.
-    await tab.send('vault.mask', { conversationId: CONV, items: [DANA] });
-    await tab.send('vault.mask', { conversationId: PENDING, items: [ROBIN] });
+    await maskVia(tab, CONV, [DANA]);
+    await maskVia(tab, PENDING, [ROBIN]);
     await settle();
     expect(toOther).toHaveLength(1);
 
@@ -258,7 +361,7 @@ describe('vault requests', () => {
   it('reports lost keys as a state, not an error', async () => {
     const { ext, client, vault, factory } = setUp();
     const tab = client(ext.openTab(URL_CONV));
-    await tab.send('vault.mask', { conversationId: CONV, items: [DANA] });
+    await maskVia(tab, CONV, [DANA]);
     vault.close();
     const raw = await openV1(factory);
     await clearRaw(raw, STORE.keys);
@@ -268,14 +371,20 @@ describe('vault requests', () => {
       value: { status: 'keys-lost' },
     });
     expect(
-      await tab.send('vault.mask', { conversationId: CONV, items: [DANA] }),
+      await tab.send('vault.prepare', { conversationId: CONV, items: [DANA] }),
+    ).toEqual({ ok: true, value: { status: 'keys-lost' } });
+    expect(
+      await tab.send('vault.commit', {
+        conversationId: CONV,
+        entries: [entry(ROBIN, 'standin.2@example.net')],
+      }),
     ).toEqual({ ok: true, value: { status: 'keys-lost' } });
   });
 
   it('reports a vault failure by its code', async () => {
     const { ext, client, vault } = setUp();
     const tab = client(ext.openTab(URL_CONV));
-    await tab.send('vault.mask', { conversationId: CONV, items: [DANA] });
+    await maskVia(tab, CONV, [DANA]);
     // Another stand-in format cannot be forced through the protocol, so a
     // failing open stands in for any vault error.
     vault.close();
@@ -300,7 +409,10 @@ describe('vault requests', () => {
     });
     const tab2 = createMessenger(PROTOCOL, ext2.openTab(URL_CONV).runtime);
     expect(
-      await tab2.send('vault.mask', { conversationId: CONV, items: [DANA] }),
+      await tab2.send('vault.prepare', {
+        conversationId: CONV,
+        items: [DANA],
+      }),
     ).toEqual({ ok: true, value: { status: 'error', code: 'unavailable' } });
   });
 });

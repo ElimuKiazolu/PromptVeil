@@ -6,8 +6,9 @@
  * - Conversation: `{site}:{id}` from the URL, or a pending ID of this tab's
  *   own for a new chat. When a new chat with masked values gets its ID, the
  *   pending chat is migrated to it.
- * - Masking asks the service worker for stand-ins (batched); any failure
- *   rejects, so the send is blocked.
+ * - Masking runs the masker's prepare/commit exchange with the service
+ *   worker (batched) as one operation for the current conversation; any
+ *   failure rejects, so the send is blocked.
  * - Loading (page start, conversation change, another tab's send) asks for
  *   the stored mappings; the request safety net learns them before the
  *   restorer may show any real value.
@@ -16,6 +17,11 @@
  * send always masks into the conversation its migration finished moving.
  */
 import type { SiteAdapter } from '@/src/adapters/types.ts';
+import type {
+  CommittedValue,
+  IssueVault,
+  PreparedValue,
+} from '@/src/core/masker.ts';
 import type {
   BoundaryRule,
   StandInMapping,
@@ -32,6 +38,7 @@ import type { EntityType } from '@/src/shared/entities.ts';
 import {
   MAX_MASK_ITEMS,
   type MaskItem,
+  type PreparedItem,
   type VaultFailure,
   type VaultNotice,
 } from '@/src/shared/vault-protocol.ts';
@@ -84,8 +91,15 @@ export interface VaultSession {
   readonly source: StandInSource;
   /** Re-reads the URL; a changed conversation is migrated or loaded. */
   checkConversation(): void;
-  /** One stand-in per item, in order; rejects on any failure. */
-  mask(items: readonly MaskItem[]): Promise<string[]>;
+  /**
+   * Runs `issue` against the current conversation's vault and remembers the
+   * stand-ins it returns (one per item, in order); rejects on any failure,
+   * or when the conversation changes meanwhile.
+   */
+  mask(
+    items: readonly MaskItem[],
+    issue: (vault: IssueVault) => Promise<string[]>,
+  ): Promise<string[]>;
   /** True for a stand-in of the current conversation. */
   isIssued(value: string): boolean;
   handleNotice(notice: VaultNotice): void;
@@ -103,6 +117,28 @@ function boundaryFor(type: EntityType): BoundaryRule {
 
 function failureReason(failure: VaultFailure): DevReason {
   return failure.status === 'keys-lost' ? 'keys-lost' : 'vault-error';
+}
+
+/** Decodes a base64 seed from the vault. */
+function seedBytes(seed: string): Uint8Array {
+  const binary = atob(seed);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function preparedValue(item: PreparedItem): PreparedValue {
+  return item.kind === 'existing'
+    ? item
+    : { kind: 'new', seed: seedBytes(item.seed), number: item.number };
+}
+
+function batches<T>(items: readonly T[]): T[][] {
+  const out: T[][] = [];
+  for (let start = 0; start < items.length; start += MAX_MASK_ITEMS) {
+    out.push(items.slice(start, start + MAX_MASK_ITEMS));
+  }
+  return out;
 }
 
 interface Conversation {
@@ -271,33 +307,67 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     void load(next);
   };
 
-  const maskBatches = async (
-    target: Conversation,
-    items: readonly MaskItem[],
-  ): Promise<string[]> => {
-    if (migration !== null && migration.to === target.id) await migrate();
-    const standIns: string[] = [];
-    for (let start = 0; start < items.length; start += MAX_MASK_ITEMS) {
-      const batch = items.slice(start, start + MAX_MASK_ITEMS);
-      const result = await messenger.send(
-        'vault.mask',
-        { conversationId: target.id, items: batch },
-        { timeoutMs: MASK_TIMEOUT_MS },
-      );
-      if (!result.ok) return fail(result.error);
-      if (result.value.status !== 'ok') {
-        if (result.value.status === 'keys-lost') status = 'keys-lost';
-        return fail(failureReason(result.value));
-      }
-      if (result.value.standIns.length !== batch.length) {
-        return fail('count-mismatch');
-      }
-      standIns.push(...result.value.standIns);
-    }
-    return standIns;
+  /**
+   * The vault of one conversation for one masking: requests are batched, and
+   * every reply is dropped (the masking fails) once the page has moved to
+   * another conversation or the values were dropped.
+   */
+  const vaultFor = (target: Conversation, masking: number): IssueVault => {
+    const current = (): void => {
+      if (masking !== generation || isDisposed()) fail('prompt-changed');
+    };
+    return {
+      prepare: async (items) => {
+        const values: PreparedValue[] = [];
+        let dateOffsetDays = 0;
+        for (const batch of batches(items)) {
+          const result = await messenger.send(
+            'vault.prepare',
+            { conversationId: target.id, items: batch },
+            { timeoutMs: MASK_TIMEOUT_MS },
+          );
+          current();
+          if (!result.ok) return fail(result.error);
+          if (result.value.status !== 'ok') {
+            if (result.value.status === 'keys-lost') status = 'keys-lost';
+            return fail(failureReason(result.value));
+          }
+          if (result.value.items.length !== batch.length) {
+            return fail('count-mismatch');
+          }
+          dateOffsetDays = result.value.dateOffsetDays;
+          values.push(...result.value.items.map(preparedValue));
+        }
+        return { dateOffsetDays, values };
+      },
+      commit: async (entries) => {
+        const values: CommittedValue[] = [];
+        for (const batch of batches(entries)) {
+          const result = await messenger.send(
+            'vault.commit',
+            { conversationId: target.id, entries: batch },
+            { timeoutMs: MASK_TIMEOUT_MS },
+          );
+          current();
+          if (!result.ok) return fail(result.error);
+          if (result.value.status !== 'ok') {
+            if (result.value.status === 'keys-lost') status = 'keys-lost';
+            return fail(failureReason(result.value));
+          }
+          if (result.value.items.length !== batch.length) {
+            return fail('count-mismatch');
+          }
+          values.push(...result.value.items);
+        }
+        return values;
+      },
+    };
   };
 
-  const mask = (items: readonly MaskItem[]): Promise<string[]> => {
+  const mask = (
+    items: readonly MaskItem[],
+    issue: (vault: IssueVault) => Promise<string[]>,
+  ): Promise<string[]> => {
     // A Send right after a navigation must not mask into the old chat.
     checkConversation();
     const target = conversation;
@@ -307,10 +377,12 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       // The page moved to another chat (or the values were dropped) before
       // or while masking: these stand-ins would belong to the old one.
       if (masking !== generation) return fail('prompt-changed');
-      const standIns = await maskBatches(target, items);
+      if (migration !== null && migration.to === target.id) await migrate();
+      const standIns = await issue(vaultFor(target, masking));
       if (masking !== generation || isDisposed()) {
         return fail('prompt-changed');
       }
+      if (standIns.length !== items.length) return fail('count-mismatch');
       let added = false;
       for (const [index, standIn] of standIns.entries()) {
         const item = items[index];

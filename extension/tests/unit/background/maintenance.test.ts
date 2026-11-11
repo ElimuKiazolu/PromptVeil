@@ -23,6 +23,7 @@ import {
 } from '@/src/shared/vault-protocol.ts';
 import {
   dumpAll,
+  maskWithService,
   openRaw,
   realValue,
   webCrypto,
@@ -139,7 +140,7 @@ describe('auto-delete run', () => {
   it('uses the retention setting and tells tabs which conversations went', async () => {
     const clock = { now: 1_000 * DAY };
     const { vault, storage, notices, deps } = setUp(() => clock.now);
-    await vault.maskValues({
+    await maskWithService(vault, {
       conversationId: 'chatgpt:old-conv',
       site: 'chatgpt',
       status: 'active',
@@ -163,7 +164,7 @@ describe('auto-delete run', () => {
 describe('delete everything', () => {
   it('deletes the database and settings except onboardingDone, makes new keys and tells every tab', async () => {
     const { vault, storage, notices, factory, deps } = setUp();
-    await vault.maskValues({
+    await maskWithService(vault, {
       conversationId: 'chatgpt:conv-1',
       site: 'chatgpt',
       status: 'active',

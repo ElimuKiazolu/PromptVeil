@@ -146,6 +146,7 @@ export default tseslint.config(
                 '**/core/detect/rules/**',
                 '**/core/detect/validators/**',
                 '**/core/draft/**',
+                '**/core/surrogate/**',
                 'libphonenumber-js',
                 'libphonenumber-js/*',
               ],
@@ -176,6 +177,7 @@ export default tseslint.config(
               group: [
                 '**/core/detect/**',
                 '**/core/draft/**',
+                '**/core/surrogate/**',
                 'libphonenumber-js',
                 'libphonenumber-js/*',
               ],

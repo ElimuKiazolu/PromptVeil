@@ -46,9 +46,17 @@ export interface StandInSpec {
    * before them, without separators); null for formats without any.
    */
   readonly checkCharacters: ((payload: string) => string | null) | null;
-  /** The pack's validator: every generated stand-in must pass it. */
+  /**
+   * Format and checksum only: every generated stand-in passes it, including
+   * stand-ins from a never-issued range that `isValid` rejects.
+   */
+  readonly isWellFormed: (value: string) => boolean;
+  /**
+   * The pack's validator: format and checksum plus the issuance rules
+   * (never-issued, reserved and voided ranges). The detector uses it.
+   */
   readonly isValid: (value: string) => boolean;
-  /** Ranges and values the validator rejects, which a stand-in must avoid. */
+  /** Ranges and values the issuance rules reject. */
   readonly avoid: readonly string[];
 }
 

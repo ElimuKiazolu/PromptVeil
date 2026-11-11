@@ -19,12 +19,13 @@ function fakeRuntime(): DetectionRuntime {
     dispose: vi.fn(),
     warmUp: () => Promise.resolve(),
     normalise: (detection) => detection.value.toLowerCase(),
+    standIn: () => null,
   };
 }
 
 function fakeModule(runtime: DetectionRuntime): DetectionModuleApi {
   return {
-    DETECTION_API_VERSION: 2,
+    DETECTION_API_VERSION: 3,
     createDetection: () => runtime,
   };
 }
@@ -131,7 +132,7 @@ describe('createLazyDetection', () => {
   it('rejects a module of another shape or version', async () => {
     for (const module of [
       {},
-      { DETECTION_API_VERSION: 1, createDetection: () => fakeRuntime() },
+      { DETECTION_API_VERSION: 2, createDetection: () => fakeRuntime() },
       null,
     ]) {
       const detection = createLazyDetection({

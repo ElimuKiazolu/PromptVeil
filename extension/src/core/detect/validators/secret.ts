@@ -122,7 +122,7 @@ function base64Value(code: number): number {
  * Bytes of a base64 or base64url string (padding optional), or null. A
  * trailing partial group that cannot hold a whole byte makes it invalid.
  */
-function decodeBase64(value: string): number[] | null {
+export function decodeBase64(value: string): number[] | null {
   const data = value.replace(/={1,2}$/u, '');
   if (data.length === 0 || data.length % 4 === 1) return null;
   const bytes: number[] = [];

@@ -85,6 +85,7 @@ const AQ_PACK: CountryPack = {
       formats: ['#########'],
       checksum: null,
       checkCharacters: null,
+      isWellFormed: () => true,
       isValid: () => true,
       avoid: [],
     },
@@ -99,6 +100,7 @@ const BV_PACK: CountryPack = {
       formats: ['#########'],
       checksum: 'luhn',
       checkCharacters: null,
+      isWellFormed: isValidLuhn,
       isValid: isValidLuhn,
       avoid: [],
     },
@@ -420,7 +422,7 @@ describe('overlaps between real rules', () => {
 
 describe('detectRules options', () => {
   it('runs only the enabled entity types', async () => {
-    const text = 'dana@example.com +44 20 7946 0018';
+    const text = 'dana@example.com +44 7400 123456';
     const emails = await detectRules(
       text,
       options({ entityTypes: new Set<EntityType>(['EMAIL']) }),

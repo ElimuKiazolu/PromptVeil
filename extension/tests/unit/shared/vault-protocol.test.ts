@@ -77,7 +77,14 @@ describe('conversation IDs', () => {
 });
 
 describe('vault message shapes', () => {
-  const mask = VAULT_PROTOCOL['vault.mask'];
+  const prepare = VAULT_PROTOCOL['vault.prepare'];
+  const commit = VAULT_PROTOCOL['vault.commit'];
+  const SEED = 'A'.repeat(43) + '=';
+  const ENTRY = {
+    item: ITEM,
+    standIn: 'standin.1@example.net',
+    standInNormalised: 'standin.1@example.net',
+  };
   const load = VAULT_PROTOCOL['vault.load'];
   const migrate = VAULT_PROTOCOL['vault.migrate'];
 
@@ -105,28 +112,81 @@ describe('vault message shapes', () => {
     }
   });
 
-  it('limits a mask request to 1–200 items', () => {
+  it('limits prepare and commit requests to 1–200 items', () => {
     const request = (count: number) => ({
       conversationId: 'chatgpt:abcdefgh',
       items: Array.from({ length: count }, () => ITEM),
     });
-    expect(mask.request(request(1))).toBe(true);
-    expect(mask.request(request(MAX_MASK_ITEMS))).toBe(true);
-    expect(mask.request(request(MAX_MASK_ITEMS + 1))).toBe(false);
-    expect(mask.request(request(0))).toBe(false);
-    expect(mask.request({ conversationId: '', items: [ITEM] })).toBe(false);
+    expect(prepare.request(request(1))).toBe(true);
+    expect(prepare.request(request(MAX_MASK_ITEMS))).toBe(true);
+    expect(prepare.request(request(MAX_MASK_ITEMS + 1))).toBe(false);
+    expect(prepare.request(request(0))).toBe(false);
+    expect(prepare.request({ conversationId: '', items: [ITEM] })).toBe(false);
+    const entries = (count: number) => ({
+      conversationId: 'chatgpt:abcdefgh',
+      entries: Array.from({ length: count }, () => ENTRY),
+    });
+    expect(commit.request(entries(1))).toBe(true);
+    expect(commit.request(entries(MAX_MASK_ITEMS))).toBe(true);
+    expect(commit.request(entries(MAX_MASK_ITEMS + 1))).toBe(false);
+    expect(commit.request(entries(0))).toBe(false);
+    for (const bad of [
+      { ...ENTRY, item: { ...ITEM, value: '' } },
+      { ...ENTRY, standIn: '' },
+      { ...ENTRY, standInNormalised: 'x'.repeat(MAX_VALUE_LENGTH + 1) },
+    ]) {
+      expect(
+        commit.request({ conversationId: 'chatgpt:abcdefgh', entries: [bad] }),
+      ).toBe(false);
+    }
+  });
+
+  it('checks prepared seeds and numbers', () => {
+    const reply = (items: unknown[], dateOffsetDays: unknown = -45) => ({
+      status: 'ok',
+      dateOffsetDays,
+      items,
+    });
+    expect(
+      prepare.response(
+        reply([
+          { kind: 'new', seed: SEED, number: 1 },
+          { kind: 'existing', standIn: 'standin.2@example.net' },
+        ]),
+      ),
+    ).toBe(true);
+    for (const item of [
+      { kind: 'new', seed: 'A'.repeat(44), number: 1 },
+      { kind: 'new', seed: SEED, number: 0 },
+      { kind: 'new', seed: SEED, number: 1.5 },
+      { kind: 'existing', standIn: '' },
+      { kind: 'other' },
+    ]) {
+      expect(prepare.response(reply([item]))).toBe(false);
+    }
+    expect(prepare.response(reply([], 1.5))).toBe(false);
+    expect(
+      commit.response({
+        status: 'ok',
+        items: [
+          { kind: 'inserted', standIn: 'standin.1@example.net' },
+          { kind: 'existing', standIn: 'standin.2@example.net' },
+          { kind: 'taken' },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      commit.response({ status: 'ok', items: [{ kind: 'inserted' }] }),
+    ).toBe(false);
   });
 
   it('checks replies, including failure codes', () => {
-    expect(
-      mask.response({ status: 'ok', standIns: ['standin.1@example.net'] }),
-    ).toBe(true);
-    expect(mask.response({ status: 'ok', standIns: [''] })).toBe(false);
-    expect(mask.response({ status: 'keys-lost' })).toBe(true);
-    expect(mask.response({ status: 'error', code: 'forbidden' })).toBe(true);
-    expect(mask.response({ status: 'error', code: 'constraint' })).toBe(true);
-    expect(mask.response({ status: 'error', code: 'oops' })).toBe(false);
-    expect(mask.response({ status: 'error', code: 'toString' })).toBe(false);
+    expect(prepare.response({ status: 'keys-lost' })).toBe(true);
+    expect(commit.response({ status: 'keys-lost' })).toBe(true);
+    expect(prepare.response({ status: 'error', code: 'forbidden' })).toBe(true);
+    expect(commit.response({ status: 'error', code: 'constraint' })).toBe(true);
+    expect(prepare.response({ status: 'error', code: 'oops' })).toBe(false);
+    expect(commit.response({ status: 'error', code: 'toString' })).toBe(false);
     expect(
       load.response({
         status: 'ok',

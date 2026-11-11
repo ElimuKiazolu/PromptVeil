@@ -20,6 +20,10 @@
  */
 import type { DetectionAlternative } from '../../../shared/entities.ts';
 import type { Span } from '../text.ts';
+import {
+  isFictionalPhone,
+  isFictionalWritten,
+} from '../validators/fictional-phones.ts';
 import { validatePhoneSliced } from '../validators/phone.ts';
 import { hasContextWord } from './context.ts';
 import { QUANTITY_AFTER, REFERENCE_BEFORE } from './negative.ts';
@@ -353,6 +357,7 @@ export const PHONE_RULE: Rule = {
   country: null,
   find: findPhoneCandidates,
   async validate(value, env) {
+    if (isFictionalWritten(value, env.homeRegions)) return INVALID;
     const result = await validatePhoneSliced(
       value,
       env.homeRegions,
@@ -360,7 +365,12 @@ export const PHONE_RULE: Rule = {
       { preferredRegions: env.preferredRegions },
     );
     if (!result.valid) return INVALID;
-    const [primary, ...others] = result.candidates;
+    // Numbers reserved for fiction belong to no one (and are where PHONE
+    // stand-ins come from).
+    const [primary, ...others] = result.candidates.filter(
+      (candidate) =>
+        !isFictionalPhone(candidate.callingCode, candidate.nationalNumber),
+    );
     if (primary === undefined) return INVALID;
     const alternatives: DetectionAlternative[] = others.map((candidate) => ({
       type: 'PHONE',

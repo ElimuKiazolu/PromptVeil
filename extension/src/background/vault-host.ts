@@ -6,6 +6,7 @@
  * mappings. Replies carry real values only to the tab that asked; other
  * tabs get notices without values.
  */
+import { toBase64 } from '@/src/core/vault/encoding.ts';
 import { VaultError } from '@/src/core/vault/errors.ts';
 import type { VaultService } from '@/src/core/vault/service.ts';
 import { parseConversationId } from '@/src/shared/conversation-id.ts';
@@ -62,22 +63,52 @@ export function registerVaultHandlers({
   };
 
   const removals = [
-    messenger.handle('vault.mask', async (request, sender) => {
+    messenger.handle('vault.prepare', async (request, sender) => {
       const conversation = allowed(sender, request.conversationId);
       if (conversation === null) return FORBIDDEN;
       try {
-        const result = await vault.maskValues({
+        const result = await vault.prepareMask({
           conversationId: request.conversationId,
           site: conversation.site,
           status: conversation.kind === 'pending' ? 'pending' : 'active',
           items: request.items,
         });
+        return {
+          status: 'ok',
+          dateOffsetDays: result.dateOffsetDays,
+          items: result.values.map((value) =>
+            value.kind === 'existing'
+              ? value
+              : {
+                  kind: 'new',
+                  seed: toBase64(value.seed),
+                  number: value.number,
+                },
+          ),
+        };
+      } catch (error) {
+        return failure(error);
+      }
+    }),
+
+    messenger.handle('vault.commit', async (request, sender) => {
+      const conversation = allowed(sender, request.conversationId);
+      if (conversation === null) return FORBIDDEN;
+      try {
+        const result = await vault.commitMask(
+          request.conversationId,
+          request.entries.map((entry) => ({
+            real: entry.item,
+            standIn: entry.standIn,
+            standInNormalised: entry.standInNormalised,
+          })),
+        );
         devlog('vault.masked', { count: result.inserted });
         // A pending chat belongs to this tab alone.
         if (result.inserted > 0 && conversation.kind === 'active') {
           changed(request.conversationId, sender);
         }
-        return { status: 'ok', standIns: result.standIns };
+        return { status: 'ok', items: result.values };
       } catch (error) {
         return failure(error);
       }

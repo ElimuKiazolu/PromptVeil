@@ -23,7 +23,7 @@ function taxIdDigits(value: string): string | null {
 }
 
 /** The repetition rule for the first ten digits. */
-function hasValidRepetition(first10: string): boolean {
+export function hasValidRepetition(first10: string): boolean {
   const counts = new Map<string, number>();
   for (const digit of first10) counts.set(digit, (counts.get(digit) ?? 0) + 1);
   const repeated = [...counts.values()].filter((count) => count > 1);
@@ -33,6 +33,17 @@ function hasValidRepetition(first10: string): boolean {
   return !/(\d)\1\1/u.test(first10);
 }
 
+/** Format and checksum: the repetition rule and the MOD 11,10 check digit. */
+export function isWellFormedTaxId(value: string): boolean {
+  const digits = taxIdDigits(value);
+  return (
+    digits !== null &&
+    hasValidRepetition(digits.slice(0, 10)) &&
+    isValidMod11_10(digits)
+  );
+}
+
+/** Adds the issuance rule: the first digit is not 0. */
 export function isValidTaxId(value: string): boolean {
   const digits = taxIdDigits(value);
   if (digits === null || digits.startsWith('0')) return false;
@@ -90,6 +101,7 @@ export const DE_PACK: CountryPack = {
       formats: ['###########', '## ### ### ###'],
       checksum: 'iso7064-mod11-10',
       checkCharacters: taxIdCheckDigit,
+      isWellFormed: isWellFormedTaxId,
       isValid: isValidTaxId,
       avoid: [
         'first digit 0',

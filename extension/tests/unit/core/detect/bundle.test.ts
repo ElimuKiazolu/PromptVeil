@@ -9,7 +9,7 @@ const immediate: Yielder = { now: () => 0, yieldNow: () => Promise.resolve() };
 
 describe('detection module entry', () => {
   it('has the interface version the content script checks', () => {
-    expect(DETECTION_API_VERSION).toBe(2);
+    expect(DETECTION_API_VERSION).toBe(3);
   });
 
   it('detects with the configured types and packs, honouring idPacks', async () => {
@@ -49,11 +49,11 @@ describe('detection module entry', () => {
     );
     // Ofcom drama range number, written nationally.
     const [email, phone] = await runtime.analyse(
-      'Dana.Whitfield@Example.COM or 020 7946 0123',
+      'Dana.Whitfield@Example.COM or 07400 123456',
     );
     if (email === undefined || phone === undefined) throw new Error('missed');
     expect(runtime.normalise(email)).toBe('dana.whitfield@example.com');
-    expect(runtime.normalise(phone)).toBe('+442079460123');
+    expect(runtime.normalise(phone)).toBe('+447400123456');
     runtime.dispose();
   });
 
@@ -79,5 +79,34 @@ describe('detection module entry', () => {
       }),
     );
     expect(yields).toBeGreaterThan(10);
+  });
+});
+
+describe('stand-in engine in the detection module', () => {
+  it('gives deterministic stand-ins for a seed and attempt', () => {
+    const runtime = createDetection(
+      {
+        homeRegions: [],
+        preferredRegions: [],
+        entityTypes: new Set(['EMAIL']),
+        idPacks: {},
+      },
+      immediate,
+    );
+    const request = {
+      type: 'EMAIL' as const,
+      subtype: null,
+      country: null,
+      value: 'dana.whitfield@example.com',
+      normalised: 'dana.whitfield@example.com',
+      dateOffsetDays: 30,
+      number: 4,
+      now: 0,
+    };
+    const seed = new Uint8Array(32).fill(7);
+    const first = runtime.standIn(request, seed, 0);
+    expect(first?.value).toMatch(/^standin\.4\.[a-z0-9]{4}@example\.net$/u);
+    expect(runtime.standIn(request, seed, 0)).toEqual(first);
+    expect(runtime.standIn(request, seed, 1)?.value).toMatch(/^standin\.5\./u);
   });
 });

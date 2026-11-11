@@ -28,10 +28,12 @@ import {
   type VaultContext,
 } from './mappings.ts';
 import {
-  maskValues,
-  type MaskRequest,
-  type MaskResult,
-  type StandInGenerator,
+  commitMask,
+  prepareMask,
+  type CommitEntry,
+  type CommitResult,
+  type PrepareRequest,
+  type PrepareResult,
 } from './mask.ts';
 import { migrateConversation, type MigrationOutcome } from './migrate.ts';
 import type { Migration } from './schema.ts';
@@ -55,11 +57,13 @@ export interface VaultService {
   isStandInTaken(conversationId: string, surrogate: string): Promise<boolean>;
   insertMapping(input: NewMapping): Promise<InsertResult>;
   loadConversation(conversationId: string): Promise<LoadedConversation>;
-  /** Stand-ins for every item of a send (see mask.ts). */
-  maskValues(
-    request: MaskRequest,
-    generate?: StandInGenerator,
-  ): Promise<MaskResult>;
+  /** Masking, step 1: stored stand-ins and seeds (see mask.ts). */
+  prepareMask(request: PrepareRequest): Promise<PrepareResult>;
+  /** Masking, step 2: stores generated stand-ins (see mask.ts). */
+  commitMask(
+    conversationId: string,
+    entries: readonly CommitEntry[],
+  ): Promise<CommitResult>;
   /** Moves a pending chat to the ID the site assigned (see migrate.ts). */
   migrate(from: string, to: string): Promise<MigrationOutcome>;
   /** Auto-delete (see cleanup.ts); works without keys. */
@@ -158,8 +162,9 @@ export function createVaultService(deps: VaultDeps): VaultService {
     insertMapping: async (input) => insertMapping(await context(), input),
     loadConversation: async (conversationId) =>
       loadConversation(await context(), conversationId),
-    maskValues: async (request, generate) =>
-      maskValues(await context(), request, generate),
+    prepareMask: async (request) => prepareMask(await context(), request),
+    commitMask: async (conversationId, entries) =>
+      commitMask(await context(), conversationId, entries),
     migrate: async (from, to) => migrateConversation(await context(), from, to),
     deleteExpired: async (options) =>
       deleteExpired(await database(), now(), options),

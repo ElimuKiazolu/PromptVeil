@@ -18,10 +18,10 @@ import type { Span } from '../../text.ts';
 import { INVALID, finding, type Rule } from '../types.ts';
 import type { CountryPack } from './index.ts';
 
-const MONTHS = 'ABCDEHLMPRST';
-const OMOCODIA = 'LMNPQRSTUV';
+export const CF_MONTHS = 'ABCDEHLMPRST';
+export const CF_OMOCODIA = 'LMNPQRSTUV';
 /** Positions (0-based) that hold digits, possibly replaced (omocodia). */
-const NUMERIC_POSITIONS = [6, 7, 9, 10, 12, 13, 14];
+export const CF_NUMERIC_POSITIONS = [6, 7, 9, 10, 12, 13, 14];
 /** Values of characters in odd positions (1st, 3rd, …): 0–9 then A–Z. */
 const ODD_VALUES = [
   1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 1, 0, 5, 7, 9, 13, 15, 17, 19, 21, 2, 4,
@@ -49,11 +49,13 @@ export function cfCheckLetter(payload: string): string | null {
 }
 
 /** The code with omocodia letters turned back into digits. */
-function decodeOmocodia(cf: string): string {
+export function decodeOmocodia(cf: string): string {
   let out = '';
   for (let i = 0; i < cf.length; i += 1) {
     const char = cf.charAt(i);
-    const digit = NUMERIC_POSITIONS.includes(i) ? OMOCODIA.indexOf(char) : -1;
+    const digit = CF_NUMERIC_POSITIONS.includes(i)
+      ? CF_OMOCODIA.indexOf(char)
+      : -1;
     out += digit === -1 ? char : digit.toString();
   }
   return out;
@@ -72,7 +74,7 @@ export function isValidCf(value: string): boolean {
   const day = Number(decoded.slice(9, 11));
   const dayOfMonth = day > 40 ? day - 40 : day;
   if (dayOfMonth < 1 || dayOfMonth > 31) return false;
-  if (!MONTHS.includes(decoded.charAt(8))) return false;
+  if (!CF_MONTHS.includes(decoded.charAt(8))) return false;
   return cfCheckLetter(value.slice(0, 15)) === value.charAt(15);
 }
 
@@ -119,6 +121,8 @@ export const IT_PACK: CountryPack = {
       formats: ['AAAAAA##A##A###A'],
       checksum: 'pack-specific',
       checkCharacters: cfCheckLetter,
+      // No issuance rules beyond the format and the check letter.
+      isWellFormed: isValidCf,
       isValid: isValidCf,
       avoid: [
         'month letters other than A B C D E H L M P R S T',

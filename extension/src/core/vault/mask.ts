@@ -1,12 +1,20 @@
 /**
- * Masking against the vault: each real value gets the stand-in its
- * conversation already uses for it, or a new one that is stored before it is
- * returned, so every tab and every later page load sends the same stand-in
- * for the same value in a conversation.
+ * Masking against the vault, in two steps, so stand-ins can be generated
+ * where the phone library and the prompt are (the content script, through
+ * the detection module) while the keys and records stay here:
+ *
+ * 1. prepareMask: each value's stored stand-in, or (new value) its seed,
+ *    HMAC(seed key, conversation, type, normal form) (TR-S1), and the
+ *    mapping number; plus the conversation's date offset.
+ * 2. commitMask: stores each generated stand-in with its real value, unless
+ *    the stand-in is taken: used for another value, or equal to a real value
+ *    of the conversation (by hash). The caller then tries its next attempt.
+ *
+ * Every tab and every later page load sends the same stand-in for the same
+ * value in a conversation, because the first one stored wins.
  */
 import type { SiteId } from '@/src/shared/settings.ts';
-import { spikeStandIn } from '../spike-standin.ts';
-import { VaultError } from './errors.ts';
+import { seedFor } from './crypto.ts';
 import {
   createConversation,
   findByReal,
@@ -16,30 +24,7 @@ import {
 } from './mappings.ts';
 import type { ConversationStatus } from './types.ts';
 
-/** New stand-ins tried for one value before giving up. */
-export const MAX_STAND_IN_ATTEMPTS = 20;
-
-const TAG_LENGTH = 4;
-const TAG_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
-
-/**
- * Four random lowercase letters or digits. Stand-ins are unique within a
- * conversation by the vault's index; the tag keeps a stand-in pasted from
- * another conversation from matching one issued here.
- */
-function randomTag(crypto: Pick<Crypto, 'getRandomValues'>): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(TAG_LENGTH));
-  let tag = '';
-  for (const byte of bytes) {
-    tag += TAG_ALPHABET.charAt(byte % TAG_ALPHABET.length);
-  }
-  return tag;
-}
-
-/** Stand-in for the `number`th mapping of a conversation. */
-export type StandInGenerator = (number: number) => string;
-
-export interface MaskRequest {
+export interface PrepareRequest {
   conversationId: string;
   site: SiteId;
   /** Status of the conversation if it has to be created. */
@@ -47,64 +32,93 @@ export interface MaskRequest {
   items: readonly RealValue[];
 }
 
-export interface MaskResult {
-  /** One stand-in per item, in order. */
-  standIns: string[];
-  /** Mappings this request created. */
-  inserted: number;
+export type PreparedValue =
+  | { kind: 'existing'; standIn: string }
+  | {
+      kind: 'new';
+      /** 32 bytes; the stand-in engine's seed for this value. */
+      seed: Uint8Array;
+      /** The mapping's number if stored now (1 for the first). */
+      number: number;
+    };
+
+export interface PrepareResult {
+  dateOffsetDays: number;
+  /** One per item, in order. */
+  values: PreparedValue[];
 }
 
 /**
- * Finds or creates the stand-in of every item, creating the conversation if
- * needed. Items are handled one at a time, so a value repeated within the
- * request reuses the mapping made for its first occurrence. Any failure
- * rejects the whole request (the send is then blocked); mappings stored
- * before the failure stay and are reused next time.
+ * Creates the conversation if needed and looks every item up. A stored
+ * value counts as a reuse. Values new to the conversation are numbered in
+ * order after its stored mappings.
  */
-export async function maskValues(
+export async function prepareMask(
   context: VaultContext,
-  request: MaskRequest,
-  generate: StandInGenerator = (number) =>
-    spikeStandIn(number, randomTag(context.crypto)),
-): Promise<MaskResult> {
+  request: PrepareRequest,
+): Promise<PrepareResult> {
   const conversation = await createConversation(context, {
     id: request.conversationId,
     site: request.site,
     status: request.status,
   });
-  const standIns: string[] = [];
-  let inserted = 0;
+  const values: PreparedValue[] = [];
+  let fresh = 0;
   for (const real of request.items) {
     const found = await findByReal(context, request.conversationId, real);
     if (found !== null) {
-      standIns.push(found.surrogate);
+      values.push({ kind: 'existing', standIn: found.surrogate });
       continue;
     }
-    const outcome = await insertNew(
-      context,
-      request.conversationId,
-      real,
-      generate,
-      conversation.mappingCount + inserted + 1,
-    );
-    if (outcome.inserted) inserted += 1;
-    standIns.push(outcome.standIn);
+    fresh += 1;
+    values.push({
+      kind: 'new',
+      seed: await seedFor(context.crypto, context.keys.seed, {
+        conversationId: request.conversationId,
+        type: real.type,
+        normalised: real.normalised,
+      }),
+      number: conversation.mappingCount + fresh,
+    });
   }
-  return { standIns, inserted };
+  return { dateOffsetDays: conversation.dateOffsetDays, values };
 }
 
-async function insertNew(
+export interface CommitEntry {
+  real: RealValue;
+  /** The stand-in exactly as it will be sent. */
+  standIn: string;
+  /** Its normal form under the real value's rules. */
+  standInNormalised: string;
+}
+
+export type CommittedValue =
+  /** Stored now, or already stored by another tab: send this stand-in. */
+  | { kind: 'inserted' | 'existing'; standIn: string }
+  /** Used for another value or equal to a real value: try another. */
+  | { kind: 'taken' };
+
+export interface CommitResult {
+  /** One per entry, in order. */
+  values: CommittedValue[];
+  /** Mappings this request stored. */
+  inserted: number;
+}
+
+/** Stores each entry (the conversation must exist; prepareMask made it). */
+export async function commitMask(
   context: VaultContext,
   conversationId: string,
-  real: RealValue,
-  generate: StandInGenerator,
-  firstNumber: number,
-): Promise<{ standIn: string; inserted: boolean }> {
-  for (let attempt = 0; attempt < MAX_STAND_IN_ATTEMPTS; attempt += 1) {
+  entries: readonly CommitEntry[],
+): Promise<CommitResult> {
+  const values: CommittedValue[] = [];
+  let inserted = 0;
+  for (const entry of entries) {
     const result = await insertMapping(context, {
       conversationId,
-      real,
-      surrogate: generate(firstNumber + attempt),
+      real: entry.real,
+      surrogate: entry.standIn,
+      surrogateNormalised: entry.standInNormalised,
       variants: [],
       locale: null,
       parentId: null,
@@ -113,13 +127,16 @@ async function insertNew(
     });
     switch (result.status) {
       case 'inserted':
-        return { standIn: result.mapping.surrogate, inserted: true };
+        inserted += 1;
+        values.push({ kind: 'inserted', standIn: result.mapping.surrogate });
+        break;
       case 'existing':
-        // Another tab stored this value meanwhile; use its stand-in.
-        return { standIn: result.mapping.surrogate, inserted: false };
+        values.push({ kind: 'existing', standIn: result.mapping.surrogate });
+        break;
       case 'surrogate-taken':
-        continue;
+        values.push({ kind: 'taken' });
+        break;
     }
   }
-  throw new VaultError('constraint');
+  return { values, inserted };
 }

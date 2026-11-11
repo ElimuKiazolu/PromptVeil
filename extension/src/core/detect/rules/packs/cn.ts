@@ -37,6 +37,20 @@ function ricCharacters(value: string): string | null {
   return /^\d{17}[\dXx]$/u.test(plain) ? plain.toUpperCase() : null;
 }
 
+/**
+ * Format and checksum: 18 characters with a real calendar date in the birth
+ * date position and the MOD 11-2 check character.
+ */
+export function isWellFormedRic(value: string): boolean {
+  const ric = ricCharacters(value);
+  if (ric === null) return false;
+  const year = Number(ric.slice(6, 10));
+  const month = Number(ric.slice(10, 12));
+  const day = Number(ric.slice(12, 14));
+  return isCalendarDate(year, month, day) && isValidMod11_2(ric);
+}
+
+/** Adds the issuance rules: a province-level code, born 1900 to today. */
 export function isValidRic(value: string, today: Date = new Date()): boolean {
   const ric = ricCharacters(value);
   if (ric === null || !PROVINCES.has(ric.slice(0, 2))) return false;
@@ -93,6 +107,7 @@ export const CN_PACK: CountryPack = {
       formats: ['#################C', '###### ######## ###C'],
       checksum: 'iso7064-mod11-2',
       checkCharacters: mod11_2CheckCharacter,
+      isWellFormed: isWellFormedRic,
       isValid: (value) => isValidRic(value),
       avoid: [
         'province codes outside GB/T 2260 (keep the real province or a listed one)',

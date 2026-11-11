@@ -179,6 +179,13 @@ export interface NewMapping {
   real: RealValue;
   /** The stand-in exactly as it will be sent. */
   surrogate: string;
+  /**
+   * The stand-in's normal form under the real value's rules (normaliseReal).
+   * When given, a stand-in equal to a real value already stored for the
+   * conversation (same type and subtype) counts as taken (TR-S3); it is
+   * found by hash, so no real value is decrypted.
+   */
+  surrogateNormalised?: string;
   /** Stand-in-side forms only. */
   variants: readonly string[];
   locale: string | null;
@@ -191,7 +198,10 @@ export type InsertResult =
   | { status: 'inserted'; mapping: Mapping }
   /** The value was stored meanwhile (e.g. by another tab); that mapping is reused. */
   | { status: 'existing'; mapping: Mapping }
-  /** The stand-in is already used for another value; generate another one. */
+  /**
+   * The stand-in is already used for another value, or equals a stored real
+   * value; generate another one.
+   */
   | { status: 'surrogate-taken' };
 
 export function mappingBinding(mapping: {
@@ -249,18 +259,35 @@ export async function insertMapping(
     createdAt: now,
     hitCount: 0,
   };
+  // Hashed before the transaction: Web Crypto would let it commit early.
+  const surrogateHash =
+    input.surrogateNormalised === undefined
+      ? null
+      : await hashOf(context, conversationId, {
+          ...real,
+          normalised: input.surrogateNormalised,
+        });
   try {
-    await withTransaction(
+    const added = await withTransaction(
       context.db,
       [STORE.mappings, STORE.conversations],
       'readwrite',
       async (transaction) => {
+        const mappings = transaction.objectStore(STORE.mappings);
+        if (surrogateHash !== null) {
+          const clashes = await requestResult(
+            mappings
+              .index(INDEX.mappingsByConvRealHash)
+              .count([conversationId, surrogateHash]),
+          );
+          if (clashes > 0) return false;
+        }
         await touchConversation(transaction, conversationId, now, 1);
-        await requestResult(
-          transaction.objectStore(STORE.mappings).add(mapping),
-        );
+        await requestResult(mappings.add(mapping));
+        return true;
       },
     );
+    if (!added) return { status: 'surrogate-taken' };
     return { status: 'inserted', mapping };
   } catch (error) {
     if (!(error instanceof VaultError) || error.code !== 'constraint') {

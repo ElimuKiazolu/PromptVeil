@@ -5,6 +5,7 @@ import { createVaultService } from '@/src/core/vault/service.ts';
 import {
   dumpAll,
   findPlaintext,
+  maskWithService,
   needles,
   openRaw,
   realValue,
@@ -17,7 +18,9 @@ const DAY = 86_400_000;
 
 // Test values: fixture identity (fictional name, example.com address),
 // libphonenumber's GB example number, the published example IBAN, UIDAI's
-// test Aadhaar number, and a made-up random key.
+// test Aadhaar number, a Stripe test card, python-stdnum's SSN example, the
+// GB 11643 worked example, and a made-up random key. Stand-ins come from
+// the stand-in engine, as in production.
 const VALUES = [
   realValue({
     type: 'EMAIL',
@@ -42,6 +45,24 @@ const VALUES = [
     subtype: 'IN_AADHAAR',
     country: 'IN',
     value: '9999 4105 7058',
+  }),
+  realValue({
+    type: 'CARD',
+    subtype: null,
+    country: null,
+    value: '4242 4242 4242 4242',
+  }),
+  realValue({
+    type: 'NATIONAL_ID',
+    subtype: 'US_SSN',
+    country: 'US',
+    value: '536-90-4399',
+  }),
+  realValue({
+    type: 'NATIONAL_ID',
+    subtype: 'CN_RIC',
+    country: 'CN',
+    value: '110105 19491231 002X',
   }),
   realValue({
     type: 'PERSON',
@@ -76,16 +97,21 @@ describe('plaintext scan over a whole cycle', () => {
       now: () => clock.now,
     });
 
-    const masked = await vault.maskValues({
+    const masked = await maskWithService(vault, {
       conversationId: PENDING,
       site: 'chatgpt',
       status: 'pending',
       items: VALUES,
     });
+    // Every stand-in differs from its real value and from the others.
+    expect(new Set(masked.standIns).size).toBe(VALUES.length);
+    masked.standIns.forEach((standIn, index) => {
+      expect(standIn).not.toBe(VALUES[index]?.value);
+    });
     // A repeat send reuses every stand-in.
     expect(
       (
-        await vault.maskValues({
+        await maskWithService(vault, {
           conversationId: PENDING,
           site: 'chatgpt',
           status: 'pending',
@@ -111,7 +137,7 @@ describe('plaintext scan over a whole cycle', () => {
     });
     await expectNoPlaintext(factory);
 
-    await vault.maskValues({
+    await maskWithService(vault, {
       conversationId: TARGET,
       site: 'chatgpt',
       status: 'active',

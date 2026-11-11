@@ -3,7 +3,8 @@
  * word, then home region, then checksum strength, else "possible".
  *
  * Values: 123456782 (python-stdnum ca.sin example, also a valid SSN shape),
- * 201 555 0143 (NANP 555-01xx fictional range; it also passes the NHS check),
+ * 809 234 5678 (libphonenumber's example Dominican Republic number, NANP; it
+ * also passes the NHS check),
  * 39053344705 (python-stdnum br.cpf example; also a valid phone number in
  * some regions, none of them Brazil).
  */
@@ -107,13 +108,11 @@ const CASES: {
   {
     // A NANP number is near-home for CA (shared +1).
     name: '10 digits: UK_NHS vs PHONE, no context word',
-    text: 'Number: 201 555 0143.',
-    value: '201 555 0143',
+    text: 'Number: 809 234 5678.',
+    value: '809 234 5678',
     expected: {
       US: 'PHONE/- confirmed',
       CA: 'PHONE/- confirmed',
-      // Also a valid Chinese landline (area code 20) when CN is home.
-      CN: 'PHONE/- confirmed',
       GB: 'NATIONAL_ID/UK_NHS confirmed',
       BR: 'NATIONAL_ID/UK_NHS confirmed',
       IN: 'NATIONAL_ID/UK_NHS confirmed',
@@ -122,8 +121,8 @@ const CASES: {
   },
   {
     name: '10 digits with a phone word',
-    text: 'Call 201 555 0143 today',
-    value: '201 555 0143',
+    text: 'Call 809 234 5678 today',
+    value: '809 234 5678',
     expected: {
       US: 'PHONE/- confirmed',
       CA: 'PHONE/- confirmed',
@@ -135,8 +134,8 @@ const CASES: {
   },
   {
     name: '10 digits with an NHS word',
-    text: 'NHS 201 555 0143',
-    value: '201 555 0143',
+    text: 'NHS 809 234 5678',
+    value: '809 234 5678',
     expected: {
       US: 'NATIONAL_ID/UK_NHS confirmed',
       CA: 'NATIONAL_ID/UK_NHS confirmed',

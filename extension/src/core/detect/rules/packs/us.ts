@@ -19,10 +19,16 @@ const GROUPS = [3, 2, 4] as const;
 /** Voided by the SSA after public use; never valid. */
 const VOIDED = new Set(['078051120', '219099999']);
 
+/** Format only: nine digits in one of the written forms (no check digit). */
+export function isWellFormedSsn(value: string): boolean {
+  return groupedDigits(value, GROUPS) !== null;
+}
+
 /** True for a valid SSN in one of its written forms. */
 export function isValidSsn(value: string): boolean {
   const read = groupedDigits(value, GROUPS);
   if (read === null) return false;
+  // Issuance rules (SSA).
   const { digits } = read;
   const area = Number(digits.slice(0, 3));
   const group = digits.slice(3, 5);
@@ -72,13 +78,13 @@ export const US_PACK: CountryPack = {
       formats: ['###-##-####', '### ## ####', '#########'],
       checksum: null,
       checkCharacters: null,
+      isWellFormed: isWellFormedSsn,
       isValid: isValidSsn,
       avoid: [
         'area 000, 666 and 900–999',
         'group 00',
         'serial 0000',
         '078-05-1120 and 219-09-9999 (voided by the SSA)',
-        '987-65-4320 to 987-65-4329 (SSA advertising range; area 9xx)',
       ],
     },
   },

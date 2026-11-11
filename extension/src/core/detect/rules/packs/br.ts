@@ -39,6 +39,14 @@ export function cpfCheckDigits(payload: string): string | null {
   return `${first.toString()}${second.toString()}`;
 }
 
+/** Format and checksum: eleven digits ending in both check digits. */
+export function isWellFormedCpf(value: string): boolean {
+  const digits = cpfDigits(value);
+  return (
+    digits !== null && cpfCheckDigits(digits.slice(0, 9)) === digits.slice(9)
+  );
+}
+
 export function isValidCpf(value: string): boolean {
   const digits = cpfDigits(value);
   if (digits === null || isRepeatedDigit(digits)) return false;
@@ -88,6 +96,7 @@ export const BR_PACK: CountryPack = {
       formats: ['###.###.###-##', '###########'],
       checksum: 'weighted-mod11',
       checkCharacters: cpfCheckDigits,
+      isWellFormed: isWellFormedCpf,
       isValid: isValidCpf,
       avoid: ['one digit repeated (000.000.000-00 … 999.999.999-99)'],
     },

@@ -15,7 +15,8 @@ import {
   createVaultService,
   type VaultService,
 } from '@/src/core/vault/service.ts';
-import { createSpikeMasker } from '@/src/core/spike-mask.ts';
+import { createMasker, issueStandIns } from '@/src/core/masker.ts';
+import { generateStandIn } from '@/src/core/surrogate/engine.ts';
 import {
   createMessenger,
   PROTOCOL,
@@ -133,6 +134,16 @@ function openSession(
   };
 }
 
+/** Masks as the content script does, with the stand-in engine. */
+const maskIn = (session: VaultSession, items: MaskItem[]) =>
+  session.mask(items, (vault) =>
+    issueStandIns(items, vault, {
+      standIn: generateStandIn,
+      fits: () => true,
+      now: Date.now(),
+    }),
+  );
+
 const realValues = (session: VaultSession) =>
   session.source
     .mappings()
@@ -148,14 +159,14 @@ describe('vault session', () => {
   it('keeps one stand-in per value across sends and tabs', async () => {
     const w = world();
     const a = openSession(w, CONV_URL);
-    const [first] = await a.session.mask([DANA]);
+    const [first] = await maskIn(a.session, [DANA]);
     expect(first).toMatch(/^standin\.1\.[a-z0-9]{4}@example\.net$/);
-    expect(await a.session.mask([ROBIN, DANA])).toEqual([
+    expect(await maskIn(a.session, [ROBIN, DANA])).toEqual([
       expect.stringMatching(/^standin\.2\./),
       first,
     ]);
     const b = openSession(w, CONV_URL);
-    expect(await b.session.mask([DANA])).toEqual([first]);
+    expect(await maskIn(b.session, [DANA])).toEqual([first]);
     expect(a.session.isIssued(first ?? '')).toBe(true);
     expect(a.session.isIssued((first ?? '').toUpperCase())).toBe(true);
   });
@@ -163,7 +174,7 @@ describe('vault session', () => {
   it('shows the stored mappings after a refresh, telling the net first', async () => {
     const w = world();
     const before = openSession(w, CONV_URL);
-    const [standIn] = await before.session.mask([DANA]);
+    const [standIn] = await maskIn(before.session, [DANA]);
     before.session.dispose();
 
     const after = openSession(w, CONV_URL);
@@ -180,7 +191,7 @@ describe('vault session', () => {
     const w = world();
     const sizes: number[] = [];
     const s = openSession(w, CONV_URL, (send) => (name, request, options) => {
-      if (name === 'vault.mask' && 'items' in request) {
+      if (name === 'vault.prepare' && 'items' in request) {
         sizes.push(request.items.length);
       }
       return send(name, request, options);
@@ -188,7 +199,7 @@ describe('vault session', () => {
     const items = Array.from({ length: 450 }, (_, i) =>
       email(`person.${i.toString()}`),
     );
-    const standIns = await s.session.mask(items);
+    const standIns = await maskIn(s.session, items);
     expect(sizes).toEqual([200, 200, 50]);
     expect(new Set(standIns).size).toBe(450);
     // Order is kept across batches.
@@ -196,13 +207,15 @@ describe('vault session', () => {
       s.session.source.mappings().map((m) => [m.real, m.standIn]),
     );
     expect(items.map((item) => byReal.get(item.value))).toEqual(standIns);
-  });
+    // 450 values prepared, generated and stored one by one in
+    // fake-indexeddb under jsdom: about 5 s on the target laptop.
+  }, 20_000);
 
   it('fails the whole send when one batch fails', async () => {
     const w = world();
     let masks = 0;
     const s = openSession(w, CONV_URL, (send) => (name, request, options) => {
-      if (name === 'vault.mask') {
+      if (name === 'vault.prepare') {
         masks += 1;
         if (masks === 2)
           return Promise.resolve({ ok: false, error: 'timeout' });
@@ -212,7 +225,7 @@ describe('vault session', () => {
     const items = Array.from({ length: 250 }, (_, i) =>
       email(`person.${i.toString()}`),
     );
-    await expect(s.session.mask(items)).rejects.toBeInstanceOf(
+    await expect(maskIn(s.session, items)).rejects.toBeInstanceOf(
       VaultSessionError,
     );
     // Nothing of the failed send is shown as issued.
@@ -225,18 +238,18 @@ describe('vault session', () => {
     const failures: ((value: object) => void)[] = [
       (value) => Object.assign(value, { status: 'error', code: 'quota' }),
       (value) => Object.assign(value, { status: 'keys-lost' }),
-      (value) => Object.assign(value, { standIns: [] }),
+      (value) => Object.assign(value, { items: [] }),
     ];
     for (const error of ['no-receiver', 'context-invalidated'] as const) {
       const s = openSession(
         w,
         CONV_URL,
         (send) => (name, request, options) =>
-          name === 'vault.mask'
+          name === 'vault.prepare'
             ? Promise.resolve({ ok: false, error })
             : send(name, request, options),
       );
-      await expect(s.session.mask([DANA])).rejects.toBeInstanceOf(
+      await expect(maskIn(s.session, [DANA])).rejects.toBeInstanceOf(
         VaultSessionError,
       );
     }
@@ -246,27 +259,43 @@ describe('vault session', () => {
         CONV_URL,
         (send) => async (name, request, options) => {
           const result = await send(name, request, options);
-          if (name === 'vault.mask' && result.ok) change(result.value);
+          if (name === 'vault.prepare' && result.ok) change(result.value);
           return result;
         },
       );
-      await expect(s.session.mask([DANA])).rejects.toBeInstanceOf(
+      await expect(maskIn(s.session, [DANA])).rejects.toBeInstanceOf(
         VaultSessionError,
       );
     }
+  });
+
+  it('rejects when storing the stand-ins fails, showing none of them', async () => {
+    const w = world();
+    const s = openSession(
+      w,
+      CONV_URL,
+      (send) => (name, request, options) =>
+        name === 'vault.commit'
+          ? Promise.resolve({ ok: false, error: 'timeout' })
+          : send(name, request, options),
+    );
+    await expect(maskIn(s.session, [DANA])).rejects.toBeInstanceOf(
+      VaultSessionError,
+    );
+    expect(s.session.source.mappings()).toEqual([]);
   });
 
   it('moves a new chat to the ID it receives and keeps its stand-ins', async () => {
     const w = world();
     const s = openSession(w, NEW_CHAT);
     const watcher = openSession(w, CONV_URL);
-    const [standIn] = await s.session.mask([DANA]);
+    const [standIn] = await maskIn(s.session, [DANA]);
     // The pending chat is this tab's own: no other tab hears of it.
     expect(w.ext.sentToTabs).toEqual([]);
 
     s.navigate(CONV_URL);
     expect(s.session.source.mappings()).toHaveLength(1);
-    expect(await s.session.mask([DANA])).toEqual([standIn]);
+    expect(await maskIn(s.session, [DANA])).toEqual([standIn]);
     expect(s.requests).toContain('vault.migrate');
     await vi.waitFor(() => {
       expect(realValues(watcher.session)).toEqual([DANA.value]);
@@ -283,7 +312,7 @@ describe('vault session', () => {
     const w = world();
     const s = openSession(w, NEW_CHAT);
     s.navigate(CONV_URL);
-    await s.session.mask([DANA]);
+    await maskIn(s.session, [DANA]);
     expect(s.requests).not.toContain('vault.migrate');
   });
 
@@ -297,13 +326,13 @@ describe('vault session', () => {
       }
       return send(name, request, options);
     });
-    const [standIn] = await s.session.mask([DANA]);
+    const [standIn] = await maskIn(s.session, [DANA]);
     s.navigate(CONV_URL);
     // First retry (the one queued at navigation failed) fails too.
-    await expect(s.session.mask([DANA])).rejects.toBeInstanceOf(
+    await expect(maskIn(s.session, [DANA])).rejects.toBeInstanceOf(
       VaultSessionError,
     );
-    expect(await s.session.mask([DANA])).toEqual([standIn]);
+    expect(await maskIn(s.session, [DANA])).toEqual([standIn]);
     expect(s.requests.filter((name) => name === 'vault.migrate')).toHaveLength(
       3,
     );
@@ -312,11 +341,11 @@ describe('vault session', () => {
   it('starts a new chat empty, with its own pending ID', async () => {
     const w = world();
     const s = openSession(w, CONV_URL);
-    const [inConversation] = await s.session.mask([DANA]);
+    const [inConversation] = await maskIn(s.session, [DANA]);
     s.navigate(NEW_CHAT);
     expect(s.session.source.mappings()).toEqual([]);
     expect(s.session.isIssued(inConversation ?? '')).toBe(false);
-    const [inNewChat] = await s.session.mask([DANA]);
+    const [inNewChat] = await maskIn(s.session, [DANA]);
     expect(inNewChat).not.toBe(inConversation);
 
     // The new chat receives its ID and keeps its stand-in.
@@ -340,13 +369,13 @@ describe('vault session', () => {
     const w = world();
     const a = openSession(w, CONV_URL);
     const b = openSession(w, CONV_URL);
-    await b.session.mask([ROBIN]);
+    await maskIn(b.session, [ROBIN]);
     await vi.waitFor(() => {
       expect(realValues(a.session)).toEqual([ROBIN.value]);
     });
     // A tab on another conversation does not load it.
     const c = openSession(w, OTHER_URL);
-    await b.session.mask([DANA]);
+    await maskIn(b.session, [DANA]);
     await vi.waitFor(() => {
       expect(realValues(a.session)).toHaveLength(2);
     });
@@ -356,7 +385,7 @@ describe('vault session', () => {
   it('drops the values when its conversation is deleted', async () => {
     const w = world();
     const s = openSession(w, CONV_URL);
-    await s.session.mask([DANA]);
+    await maskIn(s.session, [DANA]);
     s.session.handleNotice({
       name: 'vault.dropped',
       conversationIds: ['chatgpt:another-conv'],
@@ -367,7 +396,7 @@ describe('vault session', () => {
       conversationIds: [`chatgpt:${CONV_ID}`],
     });
     expect(s.session.source.mappings()).toEqual([]);
-    await s.session.mask([DANA]);
+    await maskIn(s.session, [DANA]);
     s.session.handleNotice({ name: 'vault.dropped', conversationIds: 'all' });
     expect(s.session.source.mappings()).toEqual([]);
     expect(s.session.state().status).toBe('empty');
@@ -376,7 +405,7 @@ describe('vault session', () => {
   it('forgets the values while the page is hidden and loads them when shown', async () => {
     const w = world();
     const s = openSession(w, CONV_URL);
-    await s.session.mask([DANA]);
+    await maskIn(s.session, [DANA]);
     s.session.clear();
     expect(s.session.source.mappings()).toEqual([]);
     s.session.resume();
@@ -386,7 +415,7 @@ describe('vault session', () => {
 
     // A new chat's own pending mappings come back too.
     const chat = openSession(w, NEW_CHAT);
-    await chat.session.mask([ROBIN]);
+    await maskIn(chat.session, [ROBIN]);
     chat.session.clear();
     chat.session.resume();
     await vi.waitFor(() => {
@@ -402,14 +431,14 @@ describe('vault session', () => {
       CONV_URL,
       (send) => async (name, request, options) => {
         const result = await send(name, request, options);
-        if (name === 'vault.mask') navigateDuringMask?.();
+        if (name === 'vault.prepare') navigateDuringMask?.();
         return result;
       },
     );
     navigateDuringMask = () => {
       s.navigate(OTHER_URL);
     };
-    await expect(s.session.mask([DANA])).rejects.toBeInstanceOf(
+    await expect(maskIn(s.session, [DANA])).rejects.toBeInstanceOf(
       VaultSessionError,
     );
   });
@@ -417,7 +446,7 @@ describe('vault session', () => {
   it('reports lost keys and blocks sends', async () => {
     const w = world();
     const s = openSession(w, CONV_URL);
-    await s.session.mask([DANA]);
+    await maskIn(s.session, [DANA]);
     w.vault.close();
     const raw = await openV1(w.factory);
     await clearRaw(raw, STORE.keys);
@@ -426,7 +455,7 @@ describe('vault session', () => {
     await vi.waitFor(() => {
       expect(after.session.state().status).toBe('keys-lost');
     });
-    await expect(after.session.mask([DANA])).rejects.toBeInstanceOf(
+    await expect(maskIn(after.session, [DANA])).rejects.toBeInstanceOf(
       VaultSessionError,
     );
   });
@@ -434,10 +463,10 @@ describe('vault session', () => {
   it('refuses work after it is disposed', async () => {
     const w = world();
     const s = openSession(w, CONV_URL);
-    await s.session.mask([DANA]);
+    await maskIn(s.session, [DANA]);
     s.session.dispose();
     expect(s.session.source.mappings()).toEqual([]);
-    await expect(s.session.mask([DANA])).rejects.toBeInstanceOf(
+    await expect(maskIn(s.session, [DANA])).rejects.toBeInstanceOf(
       VaultSessionError,
     );
   });
@@ -457,11 +486,13 @@ describe('vault session in the page', () => {
   function startPage(w: World, wrap?: (send: Send) => Send) {
     const h = setUpPage();
     const s = openSession(w, CONV_URL, wrap);
-    const masker = createSpikeMasker({
+    const masker = createMasker({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value.toLowerCase(),
-      issue: (items) => s.session.mask(items),
+      engine: () => Promise.resolve(generateStandIn),
+      mask: (items, issue) => s.session.mask(items, issue),
       isIssued: (value) => s.session.isIssued(value),
+      entityTypes: new Set(['EMAIL']),
     });
     const controller = new AbortController();
     const synced: number[] = [];
@@ -495,7 +526,7 @@ describe('vault session in the page', () => {
     const { h, controller } = startPage(
       w,
       (send) => (name, request, options) =>
-        name === 'vault.mask'
+        name === 'vault.prepare'
           ? Promise.resolve({ ok: false, error: 'timeout' })
           : send(name, request, options),
     );

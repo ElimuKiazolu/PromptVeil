@@ -98,6 +98,8 @@ export const SG_PACK: CountryPack = {
       checksum: 'pack-specific',
       checkCharacters: (payload) =>
         nricCheckLetter(payload.charAt(0), payload.slice(1)),
+      // No issuance rules beyond the format and the check letter.
+      isWellFormed: isValidNric,
       isValid: isValidNric,
       avoid: [
         'keep the real prefix letter (it encodes NRIC vs FIN and the series)',
