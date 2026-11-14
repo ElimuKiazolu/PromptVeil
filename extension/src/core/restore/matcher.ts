@@ -4,6 +4,7 @@ import type {
   RestoreMatcher,
   StandInMapping,
 } from './types.ts';
+import { createVariantFinder } from './variants.ts';
 
 const WORD_CHAR = /[\p{L}\p{N}_]/u;
 const EMAIL_BEFORE = /[\p{L}\p{N}._%+-]/u;
@@ -30,17 +31,26 @@ function isDelimited(
   return !(after === '.' && ALNUM.test(text.charAt(end + 1)));
 }
 
+/** An address shown in capitals comes back in capitals. */
+function realAsShown(shown: string, mapping: StandInMapping): string {
+  if (mapping.boundary !== 'email') return mapping.real;
+  const upper = shown.toUpperCase();
+  return shown === upper && shown !== shown.toLowerCase()
+    ? mapping.real.toUpperCase()
+    : mapping.real;
+}
+
 const EMPTY_MATCHER: RestoreMatcher = {
   find: () => [],
   countOccurrences: () => 0,
 };
 
 /**
- * Builds a case-insensitive matcher for a set of stand-ins. Matching is a
- * single regular-expression scan, so its cost grows with the text length,
- * not with the number of stand-ins checked one by one.
+ * Builds a case-insensitive matcher for stand-ins as they were shown.
+ * Matching is a single regular-expression scan, so its cost grows with the
+ * text length, not with the number of stand-ins checked one by one.
  */
-export function createRestoreMatcher(
+function createExactMatcher(
   mappings: Iterable<StandInMapping>,
 ): RestoreMatcher {
   const byKey = new Map<string, StandInMapping>();
@@ -96,11 +106,12 @@ export function createRestoreMatcher(
         const mapping = matchAt(text, match.index, match[0]);
         if (mapping) {
           const end = match.index + mapping.standIn.length;
+          const shown = text.slice(match.index, end);
           out.push({
             start: match.index,
             end,
-            standIn: text.slice(match.index, end),
-            real: mapping.real,
+            standIn: shown,
+            real: realAsShown(shown, mapping),
           });
           pattern.lastIndex = end;
         } else {
@@ -121,6 +132,57 @@ export function createRestoreMatcher(
         count += 1;
       }
       return count;
+    },
+  };
+}
+
+/**
+ * Builds the matcher for a conversation's stand-ins: as shown (any case),
+ * and for stand-ins with variants (see variants.ts) in their other forms.
+ * Where matches overlap, the earliest wins, then the longest; a match of a
+ * stand-in's variants wins over the same span as shown, since it carries
+ * the reply's layout.
+ */
+export function createRestoreMatcher(
+  mappings: Iterable<StandInMapping>,
+): RestoreMatcher {
+  const all = [...mappings].filter((mapping) => mapping.standIn !== '');
+  const exact = createExactMatcher(all);
+  const plain = createExactMatcher(
+    all.filter((mapping) => mapping.variants === undefined),
+  );
+  const variants = createVariantFinder(all);
+  if (all.length === 0) return EMPTY_MATCHER;
+
+  return {
+    find(text) {
+      const shown = variants.find(text).map((match): Replacement => ({
+        ...match,
+        standIn: text.slice(match.start, match.end),
+      }));
+      // Stable sort: variant matches stay ahead of equal exact ones.
+      const candidates = [...shown, ...exact.find(text)].sort(
+        (a, b) => a.start - b.start || b.end - a.end,
+      );
+      const chosen: Replacement[] = [];
+      let end = 0;
+      for (const candidate of candidates) {
+        if (candidate.start < end) continue;
+        chosen.push(candidate);
+        end = candidate.end;
+      }
+      const lastFour = variants
+        .findLastFour(text, chosen)
+        .map((match): Replacement => ({
+          ...match,
+          standIn: text.slice(match.start, match.end),
+        }));
+      if (lastFour.length === 0) return chosen;
+      return [...chosen, ...lastFour].sort((a, b) => a.start - b.start);
+    },
+
+    countOccurrences(text) {
+      return plain.countOccurrences(text) + variants.count(text);
     },
   };
 }

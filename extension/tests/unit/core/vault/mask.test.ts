@@ -1,12 +1,17 @@
+import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import { normaliseReal } from '@/src/core/detect/normal-form.ts';
 import { isSpikeStandIn } from '@/src/core/spike-standin.ts';
 import {
   commitMask,
+  peekMask,
   prepareMask,
   type PrepareRequest,
 } from '@/src/core/vault/mask.ts';
-import { loadConversation } from '@/src/core/vault/mappings.ts';
+import {
+  loadConversation,
+  type VaultContext,
+} from '@/src/core/vault/mappings.ts';
 import { STORE } from '@/src/core/vault/schema.ts';
 import {
   dumpAll,
@@ -57,6 +62,31 @@ const entry = (real: typeof DANA, standIn: string) => ({
   ),
 });
 
+/** The context with its database counting transactions by mode. */
+function counting(context: VaultContext) {
+  const opened: IDBTransactionMode[] = [];
+  const db = context.db;
+  const counted = new Proxy(db, {
+    get(target, property) {
+      if (property === 'transaction') {
+        return (
+          stores: string | string[],
+          mode?: IDBTransactionMode,
+        ): IDBTransaction => {
+          opened.push(mode ?? 'readonly');
+          return target.transaction(stores, mode);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === 'function'
+        ? (...args: unknown[]): unknown =>
+            Reflect.apply(value, target, args) as unknown
+        : value;
+    },
+  });
+  return { context: { ...context, db: counted }, opened };
+}
+
 describe('prepareMask', () => {
   it('creates the conversation and gives each new value a seed and a number', async () => {
     const context = await readyContext();
@@ -91,7 +121,6 @@ describe('prepareMask', () => {
       return value.seed;
     };
     const first = await seedOf(DANA, ACTIVE);
-    // Another written form of the same address has the same normal form.
     expect(
       await seedOf(
         realValue({ ...DANA, value: 'dana.whitfield@EXAMPLE.com' }),
@@ -101,7 +130,7 @@ describe('prepareMask', () => {
     expect(await seedOf(DANA, 'chatgpt:conv-2')).not.toEqual(first);
   });
 
-  it('returns stored stand-ins and counts the reuse', async () => {
+  it('returns stored stand-ins, numbering new values after them', async () => {
     const context = await readyContext();
     const { standIns } = await maskValues(context, request([DANA]));
     const prepared = await prepareMask(context, request([ROBIN, DANA]));
@@ -109,10 +138,47 @@ describe('prepareMask', () => {
       kind: 'existing',
       standIn: standIns[0],
     });
-    // Numbering continues after the stored mappings.
     expect(prepared.values[0]).toMatchObject({ kind: 'new', number: 2 });
-    const [record] = (await dumpAll(context.db)).get(STORE.mappings) ?? [];
-    expect(record).toMatchObject({ hitCount: 1 });
+  });
+
+  it('uses one transaction whatever the number of values', async () => {
+    const base = await readyContext();
+    const { context, opened } = counting(base);
+    const items = Array.from({ length: 50 }, (_, i) =>
+      realValue({
+        type: 'EMAIL',
+        subtype: null,
+        country: null,
+        value: `person.${i.toString()}@example.com`,
+      }),
+    );
+    await prepareMask(context, request(items));
+    expect(opened).toEqual(['readwrite']);
+  });
+});
+
+describe('peekMask', () => {
+  it('looks values up without writing anything', async () => {
+    const context = await readyContext();
+    const before = await dumpAll(context.db);
+    const peeked = await peekMask(context, PENDING, [DANA]);
+    expect(peeked.dateOffsetDays).toBeNull();
+    expect(peeked.values[0]).toMatchObject({ kind: 'new', number: 1 });
+    expect(await dumpAll(context.db)).toEqual(before);
+  });
+
+  it('gives the same seeds and stand-ins as prepareMask, in one read-only transaction', async () => {
+    const base = await readyContext();
+    const { standIns } = await maskValues(base, request([DANA]));
+    const { context, opened } = counting(base);
+    const peeked = await peekMask(context, ACTIVE, [DANA, ROBIN]);
+    expect(opened).toEqual(['readonly']);
+    const prepared = await prepareMask(base, request([DANA, ROBIN]));
+    expect(peeked).toEqual(prepared);
+    expect(peeked.values[0]).toEqual({
+      kind: 'existing',
+      standIn: standIns[0],
+    });
   });
 });
 
@@ -126,6 +192,7 @@ describe('commitMask', () => {
     ]);
     expect(result).toEqual({
       inserted: 2,
+      missing: 0,
       values: [
         { kind: 'inserted', standIn: 'standin.1.aaaa@example.net' },
         { kind: 'inserted', standIn: 'standin.2.bbbb@example.net' },
@@ -136,29 +203,65 @@ describe('commitMask', () => {
     );
   });
 
+  it('uses one transaction for any number of entries and reused values', async () => {
+    const base = await readyContext();
+    await maskValues(base, request([DANA]));
+    await prepareMask(base, request([ROBIN]));
+    const { context, opened } = counting(base);
+    const entries = Array.from({ length: 40 }, (_, i) =>
+      entry(
+        realValue({
+          type: 'EMAIL',
+          subtype: null,
+          country: null,
+          value: `person.${i.toString()}@example.com`,
+        }),
+        `standin.${(i + 10).toString()}@example.net`,
+      ),
+    );
+    const result = await commitMask(context, ACTIVE, entries, [DANA]);
+    expect(result.inserted).toBe(40);
+    expect(opened).toEqual(['readwrite']);
+  });
+
   it('reports a stand-in used for another value as taken', async () => {
     const context = await readyContext();
     await prepareMask(context, request([DANA, ROBIN]));
     await commitMask(context, ACTIVE, [entry(DANA, 'standin.1@example.net')]);
-    // Another separator or case form of the same stand-in is the same one.
     expect(
       await commitMask(context, ACTIVE, [
         entry(ROBIN, 'STANDIN.1@example.net'),
       ]),
-    ).toEqual({ inserted: 0, values: [{ kind: 'taken' }] });
+    ).toEqual({ inserted: 0, missing: 0, values: [{ kind: 'taken' }] });
   });
 
   it('reports a stand-in equal to a stored real value as taken (TR-S3)', async () => {
     const context = await readyContext();
     await prepareMask(context, request([DANA, ROBIN]));
     await commitMask(context, ACTIVE, [entry(DANA, 'standin.1@example.net')]);
-    // Robin's stand-in would be Dana's real address (in another case).
     expect(
       await commitMask(context, ACTIVE, [
         entry(ROBIN, 'dana.whitfield@example.COM'),
       ]),
-    ).toEqual({ inserted: 0, values: [{ kind: 'taken' }] });
+    ).toEqual({ inserted: 0, missing: 0, values: [{ kind: 'taken' }] });
     expect((await dumpAll(context.db)).get(STORE.mappings)).toHaveLength(1);
+  });
+
+  it('applies the checks to entries of the same request too', async () => {
+    const context = await readyContext();
+    await prepareMask(context, request([DANA, ROBIN]));
+    const result = await commitMask(context, ACTIVE, [
+      entry(DANA, 'standin.1@example.net'),
+      // The same value again, then another value with the same stand-in.
+      entry(DANA, 'standin.2@example.net'),
+      entry(ROBIN, 'standin.1@example.net'),
+    ]);
+    expect(result.values).toEqual([
+      { kind: 'inserted', standIn: 'standin.1@example.net' },
+      { kind: 'existing', standIn: 'standin.1@example.net' },
+      { kind: 'taken' },
+    ]);
+    expect(result.inserted).toBe(1);
   });
 
   it('returns the stored stand-in when another tab stored the value first', async () => {
@@ -169,7 +272,46 @@ describe('commitMask', () => {
       await commitMask(context, ACTIVE, [entry(DANA, 'standin.9@example.net')]),
     ).toEqual({
       inserted: 0,
+      missing: 0,
       values: [{ kind: 'existing', standIn: 'standin.1@example.net' }],
+    });
+  });
+
+  it('ends with one mapping when two tabs commit the same value at once', async () => {
+    const factory = new IDBFactory();
+    const a = await readyContext(factory);
+    await prepareMask(a, request([DANA]));
+    const results = await Promise.all([
+      commitMask(a, ACTIVE, [entry(DANA, 'standin.1@example.net')]),
+      commitMask(a, ACTIVE, [entry(DANA, 'standin.2@example.net')]),
+    ]);
+    const kinds = results.map((result) => result.values[0]?.kind).sort();
+    expect(kinds).toEqual(['existing', 'inserted']);
+    expect((await dumpAll(a.db)).get(STORE.mappings)).toHaveLength(1);
+  });
+
+  it('counts the reuse of stored values and marks the conversation as used', async () => {
+    let clock = 1_000;
+    const context = await readyContext(new IDBFactory(), () => clock);
+    await maskValues(context, request([DANA]));
+    clock = 5_000;
+    expect(await commitMask(context, ACTIVE, [], [DANA])).toEqual({
+      values: [],
+      inserted: 0,
+      missing: 0,
+    });
+    const [record] = (await dumpAll(context.db)).get(STORE.mappings) ?? [];
+    expect(record).toMatchObject({ hitCount: 1 });
+    expect(await getRaw(context.db, STORE.conversations, ACTIVE)).toMatchObject(
+      { lastUsedAt: 5_000, mappingCount: 1 },
+    );
+  });
+
+  it('reports reused values that are no longer stored', async () => {
+    const context = await readyContext();
+    await prepareMask(context, request([DANA]));
+    expect(await commitMask(context, ACTIVE, [], [ROBIN])).toMatchObject({
+      missing: 1,
     });
   });
 
@@ -217,7 +359,6 @@ describe('masking through both steps', () => {
     const context = await readyContext();
     const fixed = numbered((n) => `standin.${n.toString()}@example.net`);
     await maskValues(context, request([DANA]), fixed);
-    // Robin's first choice is Dana's stand-in, as if issued meanwhile.
     const result = await maskValues(
       context,
       request([ROBIN]),

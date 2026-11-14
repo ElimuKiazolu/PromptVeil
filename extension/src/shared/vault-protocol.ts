@@ -64,6 +64,16 @@ export type PrepareResponse =
   | { status: 'ok'; dateOffsetDays: number; items: PreparedItem[] }
   | VaultFailure;
 
+/** Like vault.prepare, but nothing is written (while the user types). */
+export type PeekResponse =
+  | {
+      status: 'ok';
+      /** Null while the conversation does not exist yet. */
+      dateOffsetDays: number | null;
+      items: PreparedItem[];
+    }
+  | VaultFailure;
+
 export interface CommitEntry {
   item: MaskItem;
   standIn: string;
@@ -73,14 +83,23 @@ export interface CommitEntry {
 
 export interface CommitRequest {
   conversationId: string;
+  /** New stand-ins to store. */
   entries: CommitEntry[];
+  /** Stored values sent again: their reuse is counted. */
+  reused: MaskItem[];
 }
 
 export type CommittedItem =
   { kind: 'inserted' | 'existing'; standIn: string } | { kind: 'taken' };
 
 export type CommitResponse =
-  { status: 'ok'; items: CommittedItem[] } | VaultFailure;
+  | {
+      status: 'ok';
+      items: CommittedItem[];
+      /** Reused values no longer stored (deleted since they were looked up). */
+      missing: number;
+    }
+  | VaultFailure;
 
 export interface LoadRequest {
   conversationId: string;
@@ -110,6 +129,7 @@ export type MigrateResponse =
 
 export interface VaultProtocol {
   'vault.prepare': { request: PrepareRequest; response: PrepareResponse };
+  'vault.peek': { request: PrepareRequest; response: PeekResponse };
   'vault.commit': { request: CommitRequest; response: CommitResponse };
   'vault.load': { request: LoadRequest; response: LoadResponse };
   'vault.migrate': { request: MigrateRequest; response: MigrateResponse };
@@ -210,12 +230,27 @@ function isPreparedItem(value: unknown): value is PreparedItem {
   );
 }
 
+function isOffset(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
 function isPrepareResponse(value: unknown): value is PrepareResponse {
   if (!isObject(value)) return false;
   if (value.status === 'ok') {
     return (
-      typeof value.dateOffsetDays === 'number' &&
-      Number.isSafeInteger(value.dateOffsetDays) &&
+      isOffset(value.dateOffsetDays) &&
+      Array.isArray(value.items) &&
+      value.items.every(isPreparedItem)
+    );
+  }
+  return isFailure(value);
+}
+
+function isPeekResponse(value: unknown): value is PeekResponse {
+  if (!isObject(value)) return false;
+  if (value.status === 'ok') {
+    return (
+      (value.dateOffsetDays === null || isOffset(value.dateOffsetDays)) &&
       Array.isArray(value.items) &&
       value.items.every(isPreparedItem)
     );
@@ -233,11 +268,20 @@ function isCommitEntry(value: unknown): value is CommitEntry {
 }
 
 function isCommitRequest(value: unknown): value is CommitRequest {
+  if (
+    !isObject(value) ||
+    !isConversationIdText(value.conversationId) ||
+    !Array.isArray(value.entries) ||
+    !Array.isArray(value.reused)
+  ) {
+    return false;
+  }
+  const total = value.entries.length + value.reused.length;
   return (
-    isObject(value) &&
-    isConversationIdText(value.conversationId) &&
-    isBatch(value.entries) &&
-    value.entries.every(isCommitEntry)
+    total > 0 &&
+    total <= MAX_MASK_ITEMS &&
+    value.entries.every(isCommitEntry) &&
+    value.reused.every(isMaskItem)
   );
 }
 
@@ -253,7 +297,11 @@ function isCommittedItem(value: unknown): value is CommittedItem {
 function isCommitResponse(value: unknown): value is CommitResponse {
   if (!isObject(value)) return false;
   if (value.status === 'ok') {
-    return Array.isArray(value.items) && value.items.every(isCommittedItem);
+    return (
+      Array.isArray(value.items) &&
+      value.items.every(isCommittedItem) &&
+      isCount(value.missing)
+    );
   }
   return isFailure(value);
 }
@@ -301,6 +349,7 @@ function isMigrateResponse(value: unknown): value is MigrateResponse {
 
 export const VAULT_PROTOCOL: ProtocolSpec<VaultProtocol> = {
   'vault.prepare': { request: isPrepareRequest, response: isPrepareResponse },
+  'vault.peek': { request: isPrepareRequest, response: isPeekResponse },
   'vault.commit': { request: isCommitRequest, response: isCommitResponse },
   'vault.load': { request: isLoadRequest, response: isLoadResponse },
   'vault.migrate': { request: isMigrateRequest, response: isMigrateResponse },

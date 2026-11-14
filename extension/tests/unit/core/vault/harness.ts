@@ -265,7 +265,9 @@ export function numbered(pick: (number: number) => string): TestGenerator {
 }
 
 interface MaskOps {
-  prepare(request: PrepareRequest): Promise<PrepareResult>;
+  prepare(
+    request: PrepareRequest,
+  ): Promise<PrepareResult & { dateOffsetDays: number }>;
   commit(
     conversationId: string,
     entries: readonly CommitEntry[],

@@ -478,6 +478,129 @@ describe('vault session', () => {
   });
 });
 
+describe('looking values up while the user types', () => {
+  /** Requests made since `from`, by name. */
+  const since = (requests: string[], from: number) => requests.slice(from);
+
+  it('a Send after a peek needs only the commit', async () => {
+    const w = world();
+    const s = openSession(w, CONV_URL);
+    await maskIn(s.session, [DANA]);
+    await s.session.peek([DANA, ROBIN]);
+    const from = s.requests.length;
+    const [dana, robin] = await maskIn(s.session, [DANA, ROBIN]);
+    expect(since(s.requests, from)).toEqual(['vault.commit']);
+    expect(dana).toMatch(/^standin\.1\./u);
+    expect(robin).toMatch(/^standin\.2\./u);
+    // Peeking values already looked up asks for nothing.
+    const again = s.requests.length;
+    await s.session.peek([DANA, ROBIN]);
+    expect(since(s.requests, again)).toEqual([]);
+  });
+
+  it('a peek stores nothing', async () => {
+    const w = world();
+    const s = openSession(w, CONV_URL);
+    await s.session.peek([DANA]);
+    const reloaded = openSession(w, CONV_URL);
+    await vi.waitFor(() => {
+      expect(reloaded.session.state().status).toBe('ready');
+    });
+    expect(reloaded.session.source.mappings()).toEqual([]);
+  });
+
+  it('prepares what the peek did not cover, and a new chat on its first send', async () => {
+    const w = world();
+    const s = openSession(w, NEW_CHAT);
+    // The pending chat does not exist yet: its date offset is unknown.
+    await s.session.peek([DANA]);
+    let from = s.requests.length;
+    await maskIn(s.session, [DANA]);
+    expect(since(s.requests, from)).toEqual(['vault.prepare', 'vault.commit']);
+    // An edited draft: a value the peek has not seen.
+    await s.session.peek([DANA]);
+    from = s.requests.length;
+    await maskIn(s.session, [DANA, ROBIN]);
+    expect(since(s.requests, from)).toEqual(['vault.prepare', 'vault.commit']);
+  });
+
+  it('drops looked-up values when the conversation, the vault or the page changes', async () => {
+    const w = world();
+    const s = openSession(w, CONV_URL);
+    const other = openSession(w, CONV_URL);
+    await maskIn(s.session, [DANA]);
+    const prepares = () =>
+      s.requests.filter((n) => n === 'vault.prepare').length;
+
+    // Another tab stores a value in this conversation.
+    await s.session.peek([DANA]);
+    await maskIn(other.session, [ROBIN]);
+    await vi.waitFor(() => {
+      expect(realValues(s.session)).toHaveLength(2);
+    });
+    let before = prepares();
+    await maskIn(s.session, [DANA]);
+    expect(prepares()).toBe(before + 1);
+
+    // The page is hidden.
+    await s.session.peek([DANA]);
+    s.session.clear();
+    before = prepares();
+    await maskIn(s.session, [DANA]);
+    expect(prepares()).toBe(before + 1);
+
+    // Another conversation.
+    await s.session.peek([DANA]);
+    s.navigate(OTHER_URL);
+    s.navigate(CONV_URL);
+    before = prepares();
+    await maskIn(s.session, [DANA]);
+    expect(prepares()).toBe(before + 1);
+
+    // Values deleted.
+    await s.session.peek([DANA]);
+    s.session.handleNotice({ name: 'vault.dropped', conversationIds: 'all' });
+    before = prepares();
+    await maskIn(s.session, [DANA]);
+    expect(prepares()).toBe(before + 1);
+  });
+
+  it('looks values up again when a reused one was deleted unnoticed', async () => {
+    const w = world();
+    const s = openSession(w, CONV_URL);
+    const [first] = await maskIn(s.session, [DANA]);
+    await s.session.peek([DANA]);
+    // The mapping disappears without a notice reaching this tab.
+    const raw = await openV1(w.factory);
+    await clearRaw(raw, STORE.mappings);
+    raw.close();
+    const from = s.requests.length;
+    const [second] = await maskIn(s.session, [DANA]);
+    expect(since(s.requests, from)).toEqual([
+      'vault.commit',
+      'vault.prepare',
+      'vault.commit',
+    ]);
+    expect(second).not.toBe(first);
+  });
+
+  it('a failed peek leaves the next Send working', async () => {
+    const w = world();
+    const s = openSession(
+      w,
+      CONV_URL,
+      (send) => (name, request, options) =>
+        name === 'vault.peek'
+          ? Promise.resolve({ ok: false, error: 'timeout' })
+          : send(name, request, options),
+    );
+    await expect(s.session.peek([DANA])).rejects.toBeInstanceOf(
+      VaultSessionError,
+    );
+    expect(await maskIn(s.session, [DANA])).toHaveLength(1);
+  });
+});
+
 describe('vault session in the page', () => {
   const readyNet = (synced: number[]): NetBridge => ({
     isReady: () => true,

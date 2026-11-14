@@ -54,7 +54,26 @@ export interface IssueVault {
   prepare(
     items: readonly MaskItem[],
   ): Promise<{ dateOffsetDays: number; values: readonly PreparedValue[] }>;
-  commit(entries: readonly CommitEntry[]): Promise<readonly CommittedValue[]>;
+  /**
+   * Stores new stand-ins and counts the reuse of stored ones (every send
+   * commits once, so the conversation is marked as used). `missing`: reused
+   * values no longer stored.
+   */
+  commit(
+    entries: readonly CommitEntry[],
+    reused: readonly MaskItem[],
+  ): Promise<{ values: readonly CommittedValue[]; missing: number }>;
+}
+
+/**
+ * Thrown when values looked up earlier (e.g. while the user typed) have been
+ * deleted from the vault since: the caller looks them up again.
+ */
+export class StaleStandInsError extends Error {
+  constructor() {
+    super('stale');
+    this.name = 'StaleStandInsError';
+  }
 }
 
 export type StandInFactory = (
@@ -203,14 +222,21 @@ export async function issueStandIns(
   }
   const standIns: (string | undefined)[] = [];
   let pending: Pending[] = [];
+  let reused: MaskItem[] = [];
   for (const [index, value] of prepared.values.entries()) {
     const item = items[index];
     if (item === undefined) throw new RangeError('missing item');
-    if (value.kind === 'existing') standIns[index] = value.standIn;
-    else pending.push({ ...value, index, item, attempt: 0 });
+    if (value.kind === 'existing') {
+      standIns[index] = value.standIn;
+      reused.push(item);
+    } else {
+      pending.push({ ...value, index, item, attempt: 0 });
+    }
   }
 
-  while (pending.length > 0) {
+  // The first round runs even without new values: it counts the reuse.
+  let first = true;
+  while (pending.length > 0 || first) {
     const chosen = new Set(
       standIns.flatMap((standIn) =>
         standIn === undefined ? [] : [compact(standIn)],
@@ -250,8 +276,11 @@ export async function issueStandIns(
       timings.generate += clock() - started;
     }
     started = clock();
-    const committed = await vault.commit(entries);
+    const { values: committed, missing } = await vault.commit(entries, reused);
     timings.commit += clock() - started;
+    if (missing > 0) throw new StaleStandInsError();
+    first = false;
+    reused = [];
     if (committed.length !== entries.length) {
       throw new RangeError('one commit result per entry expected');
     }
@@ -305,11 +334,21 @@ export interface PipelineOptions {
   now?: () => number;
   /** Receives each masked send's report (counts and timings only). */
   report?: (report: PipelineReport) => void;
+  /**
+   * Looks values up in the vault without storing anything (the session's
+   * peek), so a Send of the same draft needs only the commit.
+   */
+  peek?: (items: readonly MaskItem[]) => Promise<void>;
 }
 
 export interface Pipeline {
   /** Replaces each confirmed value of a masked type with its stand-in. */
   transform: (text: string) => Promise<string>;
+  /**
+   * The work a Send of this draft would do before storing anything: detect
+   * (cached by the analyzer) and look the values up (peek).
+   */
+  prepare: (text: string) => Promise<void>;
 }
 
 /** Identifies one value for the vault: type, subtype and normal form. */
@@ -322,10 +361,8 @@ export function createPipeline(options: PipelineOptions): Pipeline {
   const clock = options.clock ?? (() => 0);
   const now = options.now ?? Date.now;
 
-  const transform = async (text: string): Promise<string> => {
-    const started = clock();
-    const detections = await detect(text);
-    const rules = clock() - started;
+  /** The values a Send of these detections masks, each once. */
+  const collect = async (detections: readonly Detection[]) => {
     // Read after detection, which waits for the settings to load.
     const types = options.entityTypes();
     const spans: { detection: Detection; key: string }[] = [];
@@ -348,6 +385,19 @@ export function createPipeline(options: PipelineOptions): Pipeline {
       if (!items.has(key)) items.set(key, item);
       spans.push({ detection, key });
     }
+    return { spans, items, possible };
+  };
+
+  const prepare = async (text: string): Promise<void> => {
+    const { items } = await collect(await detect(text));
+    if (items.size > 0) await options.peek?.([...items.values()]);
+  };
+
+  const transform = async (text: string): Promise<string> => {
+    const started = clock();
+    const detections = await detect(text);
+    const rules = clock() - started;
+    const { spans, items, possible } = await collect(detections);
     const timings: PipelineTimings = {
       rules,
       prepare: 0,
@@ -368,7 +418,10 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     const standIns = await options.mask(uniqueItems, (vault) =>
       issueStandIns(uniqueItems, vault, {
         standIn: engine,
-        fits: (item, standIn) => fitsPrompt(view, item.type, standIn),
+        // A stand-in this conversation already uses is skipped here, so it
+        // costs no commit round trip (the vault checks it again).
+        fits: (item, standIn) =>
+          !isIssued(standIn.value) && fitsPrompt(view, item.type, standIn),
         now: now(),
         checkpoint: options.checkpoint?.(),
         clock,
@@ -396,5 +449,5 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     return out + text.slice(cursor);
   };
 
-  return { transform };
+  return { transform, prepare };
 }

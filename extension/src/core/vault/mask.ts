@@ -5,24 +5,40 @@
  *
  * 1. prepareMask: each value's stored stand-in, or (new value) its seed,
  *    HMAC(seed key, conversation, type, normal form) (TR-S1), and the
- *    mapping number; plus the conversation's date offset.
+ *    mapping number; plus the conversation's date offset. With `create`, a
+ *    missing conversation is created; without it (peekMask, while the user
+ *    types) nothing is written.
  * 2. commitMask: stores each generated stand-in with its real value, unless
  *    the stand-in is taken: used for another value, or equal to a real value
  *    of the conversation (by hash). The caller then tries its next attempt.
+ *    It also counts the reuse of stored values and marks the conversation as
+ *    used, so every send commits once.
+ *
+ * Each step is one IndexedDB transaction, whatever the number of values:
+ * hashes, seeds and encryptions are computed before it (Web Crypto inside a
+ * transaction would let it commit early), and every check runs inside it,
+ * so concurrent tabs still end with one mapping per value and one value per
+ * stand-in.
  *
  * Every tab and every later page load sends the same stand-in for the same
  * value in a conversation, because the first one stored wins.
  */
+import type { Mapping } from '@/src/shared/entities.ts';
 import type { SiteId } from '@/src/shared/settings.ts';
-import { seedFor } from './crypto.ts';
+import { encryptReal, seedFor } from './crypto.ts';
+import { requestResult, withTransaction } from './db.ts';
+import { VaultError } from './errors.ts';
 import {
-  createConversation,
-  findByReal,
-  insertMapping,
+  hashOf,
+  mappingBinding,
+  newConversationRecord,
   type RealValue,
   type VaultContext,
 } from './mappings.ts';
-import type { ConversationStatus } from './types.ts';
+import { normaliseStandIn } from './normalise.ts';
+import { isConversationRecord, isMappingRecord } from './records.ts';
+import { INDEX, STORE } from './schema.ts';
+import type { ConversationRecord, ConversationStatus } from './types.ts';
 
 export interface PrepareRequest {
   conversationId: string;
@@ -43,45 +59,115 @@ export type PreparedValue =
     };
 
 export interface PrepareResult {
-  dateOffsetDays: number;
+  /** Null when peeking at a conversation that does not exist yet. */
+  dateOffsetDays: number | null;
   /** One per item, in order. */
   values: PreparedValue[];
 }
 
+function conversationOf(record: unknown): ConversationRecord | null {
+  if (record === undefined) return null;
+  if (!isConversationRecord(record)) throw new VaultError('corrupt-record');
+  return record;
+}
+
+function mappingOf(record: unknown): Mapping | null {
+  if (record === undefined) return null;
+  if (!isMappingRecord(record)) throw new VaultError('corrupt-record');
+  return record;
+}
+
+/** Looks the items up; `fresh` is stored if the conversation is missing. */
+async function lookUp(
+  context: VaultContext,
+  conversationId: string,
+  items: readonly RealValue[],
+  fresh: ConversationRecord | null,
+): Promise<PrepareResult> {
+  const [hashes, seeds] = await Promise.all([
+    Promise.all(items.map((real) => hashOf(context, conversationId, real))),
+    Promise.all(
+      items.map((real) =>
+        seedFor(context.crypto, context.keys.seed, {
+          conversationId,
+          type: real.type,
+          normalised: real.normalised,
+        }),
+      ),
+    ),
+  ]);
+  const stores = [STORE.conversations, STORE.mappings] as const;
+  const { conversation, found } = await withTransaction(
+    context.db,
+    stores,
+    fresh === null ? 'readonly' : 'readwrite',
+    async (transaction) => {
+      const conversations = transaction.objectStore(STORE.conversations);
+      let stored = conversationOf(
+        await requestResult(conversations.get(conversationId)),
+      );
+      if (stored === null && fresh !== null) {
+        await requestResult(conversations.add(fresh));
+        stored = fresh;
+      }
+      const index = transaction
+        .objectStore(STORE.mappings)
+        .index(INDEX.mappingsByConvRealHash);
+      const mappings: (Mapping | null)[] = [];
+      for (const hash of hashes) {
+        mappings.push(
+          mappingOf(await requestResult(index.get([conversationId, hash]))),
+        );
+      }
+      return { conversation: stored, found: mappings };
+    },
+  );
+
+  const values: PreparedValue[] = [];
+  let count = conversation?.mappingCount ?? 0;
+  for (const [index, mapping] of found.entries()) {
+    const seed = seeds[index];
+    if (seed === undefined) throw new RangeError('missing seed');
+    if (mapping !== null) {
+      values.push({ kind: 'existing', standIn: mapping.surrogate });
+      continue;
+    }
+    count += 1;
+    values.push({ kind: 'new', seed, number: count });
+  }
+  return { dateOffsetDays: conversation?.dateOffsetDays ?? null, values };
+}
+
 /**
- * Creates the conversation if needed and looks every item up. A stored
- * value counts as a reuse. Values new to the conversation are numbered in
- * order after its stored mappings.
+ * Creates the conversation if needed and looks every item up, in one
+ * transaction. Values new to the conversation are numbered in order after
+ * its stored mappings.
  */
 export async function prepareMask(
   context: VaultContext,
   request: PrepareRequest,
+): Promise<PrepareResult & { dateOffsetDays: number }> {
+  const result = await lookUp(
+    context,
+    request.conversationId,
+    request.items,
+    newConversationRecord(context, {
+      id: request.conversationId,
+      site: request.site,
+      status: request.status,
+    }),
+  );
+  if (result.dateOffsetDays === null) throw new VaultError('no-conversation');
+  return { ...result, dateOffsetDays: result.dateOffsetDays };
+}
+
+/** prepareMask without writing anything (while the user types). */
+export function peekMask(
+  context: VaultContext,
+  conversationId: string,
+  items: readonly RealValue[],
 ): Promise<PrepareResult> {
-  const conversation = await createConversation(context, {
-    id: request.conversationId,
-    site: request.site,
-    status: request.status,
-  });
-  const values: PreparedValue[] = [];
-  let fresh = 0;
-  for (const real of request.items) {
-    const found = await findByReal(context, request.conversationId, real);
-    if (found !== null) {
-      values.push({ kind: 'existing', standIn: found.surrogate });
-      continue;
-    }
-    fresh += 1;
-    values.push({
-      kind: 'new',
-      seed: await seedFor(context.crypto, context.keys.seed, {
-        conversationId: request.conversationId,
-        type: real.type,
-        normalised: real.normalised,
-      }),
-      number: conversation.mappingCount + fresh,
-    });
-  }
-  return { dateOffsetDays: conversation.dateOffsetDays, values };
+  return lookUp(context, conversationId, items, null);
 }
 
 export interface CommitEntry {
@@ -103,40 +189,139 @@ export interface CommitResult {
   values: CommittedValue[];
   /** Mappings this request stored. */
   inserted: number;
+  /**
+   * Reused values that are no longer stored (deleted since they were looked
+   * up): the stand-ins the caller holds for them are stale.
+   */
+  missing: number;
 }
 
-/** Stores each entry (the conversation must exist; prepareMask made it). */
+interface PreparedEntry {
+  mapping: Mapping;
+  /** realHash of the stand-in read as a real value (TR-S3). */
+  standInHash: string;
+}
+
+/**
+ * Stores each entry and counts the reuse of each `reused` value, in one
+ * transaction. The conversation must exist (prepareMask made it).
+ */
 export async function commitMask(
   context: VaultContext,
   conversationId: string,
   entries: readonly CommitEntry[],
+  reused: readonly RealValue[] = [],
 ): Promise<CommitResult> {
-  const values: CommittedValue[] = [];
-  let inserted = 0;
-  for (const entry of entries) {
-    const result = await insertMapping(context, {
-      conversationId,
-      real: entry.real,
-      surrogate: entry.standIn,
-      surrogateNormalised: entry.standInNormalised,
-      variants: [],
-      locale: null,
-      parentId: null,
-      source: 'rule',
-      confidence: 1,
-    });
-    switch (result.status) {
-      case 'inserted':
+  const now = context.now();
+  const prepared: PreparedEntry[] = await Promise.all(
+    entries.map(async (entry) => {
+      const { real } = entry;
+      const id = context.crypto.randomUUID();
+      const [realHash, standInHash, realEnc] = await Promise.all([
+        hashOf(context, conversationId, real),
+        hashOf(context, conversationId, {
+          ...real,
+          normalised: entry.standInNormalised,
+        }),
+        encryptReal(
+          context.crypto,
+          context.keys.enc,
+          { value: real.value, normalised: real.normalised },
+          mappingBinding({
+            id,
+            conversationId,
+            type: real.type,
+            subtype: real.subtype,
+          }),
+        ),
+      ]);
+      const mapping: Mapping = {
+        id,
+        conversationId,
+        type: real.type,
+        subtype: real.subtype,
+        country: real.country,
+        locale: null,
+        realHash,
+        realEnc,
+        surrogate: entry.standIn,
+        surrogateNorm: normaliseStandIn(entry.standIn),
+        variants: [],
+        parentId: null,
+        source: 'rule',
+        confidence: 1,
+        createdAt: now,
+        hitCount: 0,
+      };
+      return { mapping, standInHash };
+    }),
+  );
+  const reusedHashes = await Promise.all(
+    reused.map((real) => hashOf(context, conversationId, real)),
+  );
+
+  return withTransaction(
+    context.db,
+    [STORE.conversations, STORE.mappings],
+    'readwrite',
+    async (transaction) => {
+      const conversations = transaction.objectStore(STORE.conversations);
+      const conversation = conversationOf(
+        await requestResult(conversations.get(conversationId)),
+      );
+      if (conversation === null) throw new VaultError('no-conversation');
+      const mappings = transaction.objectStore(STORE.mappings);
+      const byRealHash = mappings.index(INDEX.mappingsByConvRealHash);
+      const bySurrogate = mappings.index(INDEX.mappingsByConvSurrogate);
+
+      /** Counts a reuse of a stored mapping; false if it is not stored. */
+      const reuse = async (hash: string): Promise<Mapping | null> => {
+        const stored = mappingOf(
+          await requestResult(byRealHash.get([conversationId, hash])),
+        );
+        if (stored !== null) {
+          await requestResult(
+            mappings.put({ ...stored, hitCount: stored.hitCount + 1 }),
+          );
+        }
+        return stored;
+      };
+
+      const values: CommittedValue[] = [];
+      let inserted = 0;
+      for (const { mapping, standInHash } of prepared) {
+        // Stored meanwhile (another tab, or earlier in this request).
+        const existing = await reuse(mapping.realHash);
+        if (existing !== null) {
+          values.push({ kind: 'existing', standIn: existing.surrogate });
+          continue;
+        }
+        const usedForAnother = await requestResult(
+          bySurrogate.count([conversationId, mapping.surrogateNorm]),
+        );
+        const equalsRealValue = await requestResult(
+          byRealHash.count([conversationId, standInHash]),
+        );
+        if (usedForAnother > 0 || equalsRealValue > 0) {
+          values.push({ kind: 'taken' });
+          continue;
+        }
+        await requestResult(mappings.add(mapping));
         inserted += 1;
-        values.push({ kind: 'inserted', standIn: result.mapping.surrogate });
-        break;
-      case 'existing':
-        values.push({ kind: 'existing', standIn: result.mapping.surrogate });
-        break;
-      case 'surrogate-taken':
-        values.push({ kind: 'taken' });
-        break;
-    }
-  }
-  return { values, inserted };
+        values.push({ kind: 'inserted', standIn: mapping.surrogate });
+      }
+      let missing = 0;
+      for (const hash of reusedHashes) {
+        if ((await reuse(hash)) === null) missing += 1;
+      }
+      await requestResult(
+        conversations.put({
+          ...conversation,
+          lastUsedAt: now,
+          mappingCount: conversation.mappingCount + inserted,
+        }),
+      );
+      return { values, inserted, missing };
+    },
+  );
 }

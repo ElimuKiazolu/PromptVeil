@@ -11,9 +11,10 @@ import {
 } from 'vitest';
 import { createChatGptAdapter } from '@/src/adapters/chatgpt.ts';
 import { startRestorer } from '@/src/content/restorer.ts';
-import type {
-  StandInMapping,
-  StandInSource,
+import {
+  variantsFor,
+  type StandInMapping,
+  type StandInSource,
 } from '@/src/core/restore/index.ts';
 
 const fixture = (name: string): string =>
@@ -34,9 +35,17 @@ const DANA: StandInMapping = {
   boundary: 'email',
 };
 
+/** Fixture phone (Ofcom drama range) behind a libphonenumber example. */
+const PHONE: StandInMapping = {
+  standIn: '+44 7400 123456',
+  real: '+44 7700 900123',
+  boundary: 'word',
+  variants: variantsFor('PHONE', '+44 7400 123456', '+447700900123'),
+};
+
 const source: StandInSource = {
   version: 1,
-  mappings: () => [DANA],
+  mappings: () => [DANA, PHONE],
   subscribe: () => () => undefined,
 };
 
@@ -154,6 +163,30 @@ describe('restorer: protected surfaces', () => {
     expect(link.getAttribute('href')).toBe('mailto:standin.1@example.net');
     expect(link.textContent).toBe('standin.1@example.net');
     expect(normal.textContent).toBe('Mail dana@example.com soon.');
+  });
+
+  it('leaves a tel: link inside an editable surface as the stand-in', async () => {
+    load(fixture('reply.html'));
+    const reply = query('[data-markdown-text-style="assistant-message"]');
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    const inside = document.createElement('a');
+    inside.setAttribute('href', 'tel:07400123456');
+    inside.textContent = '07400 123456';
+    editable.append(inside);
+    const outside = document.createElement('a');
+    outside.setAttribute('href', 'tel:07400123456');
+    outside.textContent = '07400 123456';
+    const p = document.createElement('p');
+    p.append(outside);
+    reply.append(p, editable);
+
+    start();
+    await settle();
+    expect(inside.getAttribute('href')).toBe('tel:07400123456');
+    expect(inside.textContent).toBe('07400 123456');
+    expect(outside.getAttribute('href')).toBe('tel:07700900123');
+    expect(outside.textContent).toBe('07700 900123');
   });
 
   it('restores a normal reply next to a Writing card and leaves the card alone', async () => {

@@ -234,7 +234,7 @@ export function startRestorer({
     for (const anchor of anchors) {
       if (isProtected(anchor)) continue;
       const href = anchor.getAttribute('href') ?? '';
-      if (!/^mailto:/i.test(href)) continue;
+      if (!/^(?:mailto|tel):/i.test(href)) continue;
       const found = matcher.find(href);
       if (found.length === 0) continue;
       let next = '';

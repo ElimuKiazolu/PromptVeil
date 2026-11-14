@@ -16,7 +16,9 @@ import { COUNTRY_PACKS } from '@/src/core/detect/rules/packs/index.ts';
 import {
   createPipeline,
   MASKABLE_TYPES,
+  issueStandIns,
   needsMasking,
+  StaleStandInsError,
   type CommittedValue,
   type IssueVault,
   type PipelineOptions,
@@ -49,14 +51,15 @@ function memoryVault() {
       });
     },
     commit: (entries) =>
-      Promise.resolve(
-        entries.map((entry): CommittedValue => {
+      Promise.resolve({
+        values: entries.map((entry): CommittedValue => {
           if (used.has(entry.standIn)) return { kind: 'taken' };
           used.add(entry.standIn);
           stored.set(entry.item.normalised, entry.standIn);
           return { kind: 'inserted', standIn: entry.standIn };
         }),
-      ),
+        missing: 0,
+      }),
   };
   return { vault, used };
 }
@@ -203,5 +206,67 @@ describe('needsMasking', () => {
         () => false,
       ),
     ).toBe(false);
+  });
+});
+
+describe('one commit per send', () => {
+  const item = {
+    type: 'EMAIL' as const,
+    subtype: null,
+    country: null,
+    value: 'dana.whitfield@example.com',
+    normalised: 'dana.whitfield@example.com',
+  };
+  const existing: IssueVault['prepare'] = () =>
+    Promise.resolve({
+      dateOffsetDays: 30,
+      values: [{ kind: 'existing', standIn: 'standin.1.ab12@example.net' }],
+    });
+
+  it('commits stored values as reused, even with nothing new', async () => {
+    const commits: unknown[] = [];
+    const vault: IssueVault = {
+      prepare: existing,
+      commit: (entries, reused) => {
+        commits.push({ entries: entries.length, reused: reused.length });
+        return Promise.resolve({ values: [], missing: 0 });
+      },
+    };
+    const standIns = await issueStandIns([item], vault, {
+      standIn: generateStandIn,
+      fits: () => true,
+      now: 0,
+    });
+    expect(standIns).toEqual(['standin.1.ab12@example.net']);
+    expect(commits).toEqual([{ entries: 0, reused: 1 }]);
+  });
+
+  it('rejects with StaleStandInsError when a reused value is gone', async () => {
+    const vault: IssueVault = {
+      prepare: existing,
+      commit: () => Promise.resolve({ values: [], missing: 1 }),
+    };
+    await expect(
+      issueStandIns([item], vault, {
+        standIn: generateStandIn,
+        fits: () => true,
+        now: 0,
+      }),
+    ).rejects.toBeInstanceOf(StaleStandInsError);
+  });
+
+  it('prepare() looks up the values a Send would mask, and nothing else', async () => {
+    const peeked: string[][] = [];
+    const { prepare } = pipeline({
+      peek: (items) => {
+        peeked.push(items.map((entry) => entry.type));
+        return Promise.resolve();
+      },
+    });
+    await prepare(PROMPT);
+    expect(peeked).toHaveLength(1);
+    expect(peeked[0]).toHaveLength(REAL.length);
+    await prepare('nothing to mask here');
+    expect(peeked).toHaveLength(1);
   });
 });

@@ -111,6 +111,7 @@ async function maskVia(
     issuedCount += 1;
     const standIn = `standin.${issuedCount.toString()}.test@example.net`;
     const committed = await tab.send('vault.commit', {
+      reused: [],
       conversationId,
       entries: [{ item, standIn, standInNormalised: standIn }],
     });
@@ -182,6 +183,7 @@ describe('sender checks', () => {
       ).toEqual({ ok: true, value: forbidden });
       expect(
         await tab.send('vault.commit', {
+          reused: [],
           conversationId,
           entries: [entry(DANA, 'standin.1@example.net')],
         }),
@@ -200,6 +202,7 @@ describe('sender checks', () => {
       ).toEqual({ ok: true, value: forbidden });
       expect(
         await client.send('vault.commit', {
+          reused: [],
           conversationId: CONV,
           entries: [entry(DANA, 'standin.1@example.net')],
         }),
@@ -257,6 +260,7 @@ describe('sender checks', () => {
     ).toEqual({ ok: false, error: 'rejected' });
     expect(
       await tab.send('vault.commit', {
+        reused: [],
         conversationId: CONV,
         entries: Array.from({ length: 201 }, () =>
           entry(DANA, 'standin.1@example.net'),
@@ -265,6 +269,7 @@ describe('sender checks', () => {
     ).toEqual({ ok: false, error: 'rejected' });
     expect(
       await tab.send('vault.commit', {
+        reused: [],
         conversationId: CONV,
         entries: [{ ...entry(DANA, 'standin.1@example.net'), standIn: '' }],
       }),
@@ -306,12 +311,13 @@ describe('vault requests', () => {
     // A stand-in used for one value is taken for another.
     expect(
       await tab.send('vault.commit', {
+        reused: [],
         conversationId: CONV,
         entries: [entry(ROBIN, standIn)],
       }),
     ).toEqual({
       ok: true,
-      value: { status: 'ok', items: [{ kind: 'taken' }] },
+      value: { status: 'ok', items: [{ kind: 'taken' }], missing: 0 },
     });
     expect(await tab.send('vault.load', { conversationId: CONV })).toEqual({
       ok: true,
@@ -385,6 +391,7 @@ describe('vault requests', () => {
     ).toEqual({ ok: true, value: { status: 'keys-lost' } });
     expect(
       await tab.send('vault.commit', {
+        reused: [],
         conversationId: CONV,
         entries: [entry(ROBIN, 'standin.2@example.net')],
       }),

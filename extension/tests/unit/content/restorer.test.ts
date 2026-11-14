@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createChatGptAdapter } from '@/src/adapters/chatgpt.ts';
 import type { SiteAdapter } from '@/src/adapters/types.ts';
 import { startRestorer } from '@/src/content/restorer.ts';
-import type {
-  StandInMapping,
-  StandInSource,
+import {
+  variantsFor,
+  type StandInMapping,
+  type StandInSource,
 } from '@/src/core/restore/index.ts';
 
 const fixture = (name: string): string =>
@@ -30,6 +31,25 @@ const OPS: StandInMapping = {
   standIn: 'standin.2@example.net',
   real: 'ops@example.org',
   boundary: 'email',
+};
+
+/** Fixture phone (Ofcom drama range) behind a libphonenumber example. */
+const PHONE: StandInMapping = {
+  standIn: '+44 7400 123456',
+  real: '+44 7700 900123',
+  boundary: 'word',
+  variants: variantsFor('PHONE', '+44 7400 123456', '+447700900123'),
+};
+/** The IBAN registry's GB example behind its other published example. */
+const IBAN: StandInMapping = {
+  standIn: 'GB82 WEST 1234 5698 7654 32',
+  real: 'GB29 NWBK 6016 1331 9268 19',
+  boundary: 'word',
+  variants: variantsFor(
+    'BANK',
+    'GB82 WEST 1234 5698 7654 32',
+    'GB29NWBK60161331926819',
+  ),
 };
 
 function mutableSource(initial: StandInMapping[]) {
@@ -310,6 +330,64 @@ describe('startRestorer', () => {
     link.setAttribute('href', 'mailto:standin.1@example.net');
     await settle();
     expect(link.getAttribute('href')).toBe('mailto:dana@example.com');
+  });
+
+  it('restores the number of a tel: link, in the form the link uses', async () => {
+    const link = document.createElement('a');
+    link.setAttribute('href', 'tel:+447400123456');
+    link.textContent = '07400 123456';
+    const p = document.createElement('p');
+    p.append('Call ', link);
+    assistantContent().append(p);
+
+    start(mutableSource([PHONE]).source);
+    await settle();
+    expect(link.getAttribute('href')).toBe('tel:+447700900123');
+    expect(link.textContent).toBe('07700 900123');
+  });
+
+  it('restores stand-ins a reply rewrote in another form', async () => {
+    start(mutableSource([PHONE, IBAN, DANA]).source);
+    await settle();
+    const p = document.createElement('p');
+    assistantContent().append(p);
+    p.append(
+      wordSpan('Ring '),
+      wordSpan('0044 '),
+      wordSpan('7400 '),
+      wordSpan('123456, '),
+      wordSpan('pay '),
+      wordSpan('gb82west12345698765432 '),
+      wordSpan('or write to '),
+      wordSpan('STANDIN.1@EXAMPLE.NET.'),
+    );
+    await wait(QUIET_MS * 3);
+    await settle();
+    expect(p.textContent).toBe(
+      'Ring 0044 7700 900123, pay gb29nwbk60161331926819 or write to DANA@EXAMPLE.COM.',
+    );
+    expect(p.children).toHaveLength(8);
+  });
+
+  it('counts unrestored stand-ins of every type and form in the leak check', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    start(mutableSource([PHONE, IBAN, DANA]).source);
+    await settle();
+    const p = document.createElement('p');
+    assistantContent().append(p);
+    // Fused with other characters: not restored, but still counted.
+    p.append(
+      wordSpan('x07400123456 '),
+      wordSpan('IDGB82-WEST-1234-5698-7654-32 '),
+      wordSpan('end.'),
+    );
+    await wait(QUIET_MS * 3);
+    await settle();
+
+    const lines = info.mock.calls.map((call) => String(call[0]));
+    const leak = lines.filter((line) => line.includes('restore.leak-check'));
+    expect(leak.at(-1)).toMatch(/count=2$/);
+    for (const line of lines) expect(line).not.toMatch(/d{6}/);
   });
 
   it('logs only a count in the leak check after a reply settles', async () => {

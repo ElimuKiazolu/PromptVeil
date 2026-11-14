@@ -122,21 +122,39 @@ describe('vault message shapes', () => {
     expect(prepare.request(request(MAX_MASK_ITEMS + 1))).toBe(false);
     expect(prepare.request(request(0))).toBe(false);
     expect(prepare.request({ conversationId: '', items: [ITEM] })).toBe(false);
-    const entries = (count: number) => ({
+    const entries = (count: number, reused = 0) => ({
       conversationId: 'chatgpt:abcdefgh',
       entries: Array.from({ length: count }, () => ENTRY),
+      reused: Array.from({ length: reused }, () => ITEM),
     });
     expect(commit.request(entries(1))).toBe(true);
     expect(commit.request(entries(MAX_MASK_ITEMS))).toBe(true);
     expect(commit.request(entries(MAX_MASK_ITEMS + 1))).toBe(false);
     expect(commit.request(entries(0))).toBe(false);
+    // Reused values alone are a valid commit; the 200 limit counts both.
+    expect(commit.request(entries(0, 3))).toBe(true);
+    expect(commit.request(entries(150, 51))).toBe(false);
+    expect(
+      commit.request({ conversationId: 'chatgpt:abcdefgh', entries: [ENTRY] }),
+    ).toBe(false);
+    expect(
+      commit.request({
+        conversationId: 'chatgpt:abcdefgh',
+        entries: [],
+        reused: [{ ...ITEM, value: '' }],
+      }),
+    ).toBe(false);
     for (const bad of [
       { ...ENTRY, item: { ...ITEM, value: '' } },
       { ...ENTRY, standIn: '' },
       { ...ENTRY, standInNormalised: 'x'.repeat(MAX_VALUE_LENGTH + 1) },
     ]) {
       expect(
-        commit.request({ conversationId: 'chatgpt:abcdefgh', entries: [bad] }),
+        commit.request({
+          conversationId: 'chatgpt:abcdefgh',
+          entries: [bad],
+          reused: [],
+        }),
       ).toBe(false);
     }
   });
@@ -173,11 +191,21 @@ describe('vault message shapes', () => {
           { kind: 'existing', standIn: 'standin.2@example.net' },
           { kind: 'taken' },
         ],
+        missing: 0,
       }),
     ).toBe(true);
     expect(
-      commit.response({ status: 'ok', items: [{ kind: 'inserted' }] }),
+      commit.response({
+        status: 'ok',
+        items: [{ kind: 'inserted' }],
+        missing: 0,
+      }),
     ).toBe(false);
+    expect(commit.response({ status: 'ok', items: [] })).toBe(false);
+    // A peek may come before the conversation exists.
+    const peek = VAULT_PROTOCOL['vault.peek'];
+    expect(peek.response(reply([], null))).toBe(true);
+    expect(prepare.response(reply([], null))).toBe(false);
   });
 
   it('checks replies, including failure codes', () => {

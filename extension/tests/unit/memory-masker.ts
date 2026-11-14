@@ -78,7 +78,7 @@ export function createMemoryMasker(options: {
       mappings = [...byKey.values()];
       version += 1;
       for (const listener of listeners) listener();
-      return Promise.resolve(values);
+      return Promise.resolve({ values, missing: 0 });
     },
   };
 

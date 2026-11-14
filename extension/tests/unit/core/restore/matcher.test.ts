@@ -76,7 +76,8 @@ describe('createRestoreMatcher', () => {
         'a\nstandin.1@example.net\nb',
         'a\ndana@example.com\nb',
       ],
-      ['uppercase', 'STANDIN.1@EXAMPLE.NET', 'dana@example.com'],
+      // Capitals come back in capitals.
+      ['uppercase', 'STANDIN.1@EXAMPLE.NET', 'DANA@EXAMPLE.COM'],
       ['mixed case', 'Standin.1@Example.Net', 'dana@example.com'],
       ['colon after', 'standin.1@example.net: hi', 'dana@example.com: hi'],
       [

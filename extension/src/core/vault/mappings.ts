@@ -55,6 +55,21 @@ export interface NewConversation {
   status: ConversationStatus;
 }
 
+/** A conversation record as created now (not stored yet). */
+export function newConversationRecord(
+  context: Pick<VaultContext, 'crypto' | 'now'>,
+  input: NewConversation,
+): ConversationRecord {
+  const now = context.now();
+  return {
+    ...input,
+    dateOffsetDays: randomDateOffsetDays(context.crypto),
+    createdAt: now,
+    lastUsedAt: now,
+    mappingCount: 0,
+  };
+}
+
 /** Returns the conversation, creating it if it does not exist yet. */
 export async function createConversation(
   context: VaultContext,
@@ -87,7 +102,8 @@ export async function createConversation(
   );
 }
 
-async function hashOf(
+/** The keyed lookup hash of a real value in a conversation (see crypto.ts). */
+export async function hashOf(
   context: VaultContext,
   conversationId: string,
   real: RealValue,

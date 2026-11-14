@@ -16,7 +16,11 @@ import type {
   Messenger,
   Protocol,
 } from '@/src/shared/messaging.ts';
-import type { VaultFailure } from '@/src/shared/vault-protocol.ts';
+import type {
+  PreparedItem,
+  VaultFailure,
+} from '@/src/shared/vault-protocol.ts';
+import type { PreparedValue } from '@/src/core/vault/mask.ts';
 import { senderSite } from './sites.ts';
 import { notifyTabs, type TabsLike } from './tab-notices.ts';
 
@@ -81,6 +85,13 @@ export function createConversationQueue(): <T>(
   };
 }
 
+/** A prepared value as sent: the seed in base64. */
+function preparedItem(value: PreparedValue): PreparedItem {
+  return value.kind === 'existing'
+    ? value
+    : { kind: 'new', seed: toBase64(value.seed), number: value.number };
+}
+
 /** Registers the vault handlers; returns their removal. */
 export function registerVaultHandlers({
   messenger,
@@ -112,15 +123,23 @@ export function registerVaultHandlers({
         return {
           status: 'ok',
           dateOffsetDays: result.dateOffsetDays,
-          items: result.values.map((value) =>
-            value.kind === 'existing'
-              ? value
-              : {
-                  kind: 'new',
-                  seed: toBase64(value.seed),
-                  number: value.number,
-                },
-          ),
+          items: result.values.map(preparedItem),
+        };
+      } catch (error) {
+        return failure(error);
+      }
+    }),
+
+    messenger.handle('vault.peek', async (request, sender) => {
+      if (allowed(sender, request.conversationId) === null) return FORBIDDEN;
+      try {
+        const result = await inOrder([request.conversationId], () =>
+          vault.peekMask(request.conversationId, request.items),
+        );
+        return {
+          status: 'ok',
+          dateOffsetDays: result.dateOffsetDays,
+          items: result.values.map(preparedItem),
         };
       } catch (error) {
         return failure(error);
@@ -128,6 +147,8 @@ export function registerVaultHandlers({
     }),
 
     messenger.handle('vault.commit', async (request, sender) => {
+      // Handling time, queue wait included (dev log only).
+      const started = performance.now();
       const conversation = allowed(sender, request.conversationId);
       if (conversation === null) return FORBIDDEN;
       try {
@@ -139,14 +160,18 @@ export function registerVaultHandlers({
               standIn: entry.standIn,
               standInNormalised: entry.standInNormalised,
             })),
+            request.reused,
           ),
         );
-        devlog('vault.masked', { count: result.inserted });
+        devlog('vault.masked', {
+          count: result.inserted,
+          ms: performance.now() - started,
+        });
         // A pending chat belongs to this tab alone.
         if (result.inserted > 0 && conversation.kind === 'active') {
           changed(request.conversationId, sender);
         }
-        return { status: 'ok', items: result.values };
+        return { status: 'ok', items: result.values, missing: result.missing };
       } catch (error) {
         return failure(error);
       }

@@ -6,9 +6,12 @@
  * - Conversation: `{site}:{id}` from the URL, or a pending ID of this tab's
  *   own for a new chat. When a new chat with masked values gets its ID, the
  *   pending chat is migrated to it.
- * - Masking runs the masker's prepare/commit exchange with the service
+ * - Masking runs the pipeline's prepare/commit exchange with the service
  *   worker (batched) as one operation for the current conversation; any
  *   failure rejects, so the send is blocked.
+ * - While the user types, `peek` looks the draft's values up without
+ *   writing anything; Send reuses those results (stored stand-ins and
+ *   seeds) when they are still valid, so it needs only the commit.
  * - Loading (page start, conversation change, another tab's send) asks for
  *   the stored mappings; the request safety net learns them before the
  *   restorer may show any real value.
@@ -17,15 +20,17 @@
  * send always masks into the conversation its migration finished moving.
  */
 import type { SiteAdapter } from '@/src/adapters/types.ts';
-import type {
-  CommittedValue,
-  IssueVault,
-  PreparedValue,
+import {
+  StaleStandInsError,
+  type CommittedValue,
+  type IssueVault,
+  type PreparedValue,
 } from '@/src/core/pipeline.ts';
-import type {
-  BoundaryRule,
-  StandInMapping,
-  StandInSource,
+import {
+  variantsFor,
+  type BoundaryRule,
+  type StandInMapping,
+  type StandInSource,
 } from '@/src/core/restore/index.ts';
 import { netForms } from '@/src/core/net/forms.ts';
 import {
@@ -101,6 +106,12 @@ export interface VaultSession {
     items: readonly MaskItem[],
     issue: (vault: IssueVault) => Promise<string[]>,
   ): Promise<string[]>;
+  /**
+   * Looks the items up in the current conversation without storing
+   * anything, so a later mask can skip that step. Values already looked up
+   * are not asked for again.
+   */
+  peek(items: readonly MaskItem[]): Promise<void>;
   /** True for a stand-in of the current conversation. */
   isIssued(value: string): boolean;
   handleNotice(notice: VaultNotice): void;
@@ -132,6 +143,43 @@ function preparedValue(item: PreparedItem): PreparedValue {
   return item.kind === 'existing'
     ? item
     : { kind: 'new', seed: seedBytes(item.seed), number: item.number };
+}
+
+/** Identifies one value: type, subtype and normal form. */
+function itemKey(item: MaskItem): string {
+  return JSON.stringify([item.type, item.subtype, item.normalised]);
+}
+
+/** Entries and reused values in requests of at most MAX_MASK_ITEMS. */
+function commitBatches<E, R>(
+  entries: readonly E[],
+  reused: readonly R[],
+): { entries: E[]; reused: R[] }[] {
+  const out: { entries: E[]; reused: R[] }[] = [];
+  const total = entries.length + reused.length;
+  for (let start = 0; start < total; start += MAX_MASK_ITEMS) {
+    const end = Math.min(total, start + MAX_MASK_ITEMS);
+    out.push({
+      entries: entries.slice(start, Math.min(end, entries.length)),
+      reused: reused.slice(
+        Math.max(0, start - entries.length),
+        Math.max(0, end - entries.length),
+      ),
+    });
+  }
+  return out;
+}
+
+/**
+ * Looked-up values of one conversation (stored stand-ins and seeds), valid
+ * while the conversation and the vault's view of it stay the same.
+ */
+interface PreparedCache {
+  conversationId: string;
+  generation: number;
+  /** Null until the conversation exists in the vault. */
+  dateOffsetDays: number | null;
+  values: Map<string, PreparedValue>;
 }
 
 function batches<T>(items: readonly T[]): T[][] {
@@ -170,6 +218,34 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
   // Read through a function after an await: the flag changes in callbacks.
   const isDisposed = (): boolean => disposed;
   let queue: Promise<unknown> = Promise.resolve();
+  /** Real values: memory only, dropped with the other session data. */
+  let prepared: PreparedCache | null = null;
+
+  const cacheFor = (target: Conversation): PreparedCache | null =>
+    prepared !== null &&
+    prepared.conversationId === target.id &&
+    prepared.generation === generation
+      ? prepared
+      : null;
+
+  /** The cache for `target`, started afresh if it is for something else. */
+  const cacheOf = (
+    target: Conversation,
+    dateOffsetDays: number | null,
+  ): PreparedCache => {
+    const current = cacheFor(target);
+    if (current !== null) {
+      current.dateOffsetDays ??= dateOffsetDays;
+      return current;
+    }
+    prepared = {
+      conversationId: target.id,
+      generation,
+      dateOffsetDays,
+      values: new Map(),
+    };
+    return prepared;
+  };
 
   /** Runs vault operations one at a time, in order. */
   const serial = <T>(task: () => Promise<T>): Promise<T> => {
@@ -203,6 +279,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       real,
       boundary: boundaryFor(type),
       netForms: netForms(type, real, normalised),
+      variants: variantsFor(type, standIn, normalised),
     });
     return true;
   };
@@ -333,6 +410,17 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     };
     return {
       prepare: async (items) => {
+        // Looked up while the user typed: nothing to ask for.
+        const cached = cacheFor(target);
+        if (cached !== null && cached.dateOffsetDays !== null) {
+          const hits = items.map((item) => cached.values.get(itemKey(item)));
+          if (hits.every((hit) => hit !== undefined)) {
+            return {
+              dateOffsetDays: cached.dateOffsetDays,
+              values: hits,
+            };
+          }
+        }
         const values: PreparedValue[] = [];
         let dateOffsetDays = 0;
         for (const batch of batches(items)) {
@@ -353,14 +441,24 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
           dateOffsetDays = result.value.dateOffsetDays;
           values.push(...result.value.items.map(preparedValue));
         }
+        const cache = cacheOf(target, dateOffsetDays);
+        for (const [index, value] of values.entries()) {
+          const item = items[index];
+          if (item !== undefined) cache.values.set(itemKey(item), value);
+        }
         return { dateOffsetDays, values };
       },
-      commit: async (entries) => {
+      commit: async (entries, reused) => {
         const values: CommittedValue[] = [];
-        for (const batch of batches(entries)) {
+        let missing = 0;
+        for (const batch of commitBatches(entries, reused)) {
           const result = await messenger.send(
             'vault.commit',
-            { conversationId: target.id, entries: batch },
+            {
+              conversationId: target.id,
+              entries: batch.entries,
+              reused: batch.reused,
+            },
             { timeoutMs: MASK_TIMEOUT_MS },
           );
           current();
@@ -369,12 +467,24 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
             if (result.value.status === 'keys-lost') status = 'keys-lost';
             return fail(failureReason(result.value));
           }
-          if (result.value.items.length !== batch.length) {
+          if (result.value.items.length !== batch.entries.length) {
             return fail('count-mismatch');
           }
           values.push(...result.value.items);
+          missing += result.value.missing;
         }
-        return values;
+        // Stored now: later sends reuse these stand-ins.
+        const cache = cacheFor(target);
+        for (const [index, value] of values.entries()) {
+          const entry = entries[index];
+          if (cache !== null && entry !== undefined && value.kind !== 'taken') {
+            cache.values.set(itemKey(entry.item), {
+              kind: 'existing',
+              standIn: value.standIn,
+            });
+          }
+        }
+        return { values, missing };
       },
     };
   };
@@ -393,7 +503,15 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       // or while masking: these stand-ins would belong to the old one.
       if (masking !== generation) return fail('prompt-changed');
       if (migration !== null && migration.to === target.id) await migrate();
-      const standIns = await issue(vaultFor(target, masking));
+      let standIns: string[];
+      try {
+        standIns = await issue(vaultFor(target, masking));
+      } catch (error) {
+        if (!(error instanceof StaleStandInsError)) throw error;
+        // Values looked up earlier were deleted since: look them up again.
+        prepared = null;
+        standIns = await issue(vaultFor(target, masking));
+      }
       if (masking !== generation || isDisposed()) {
         return fail('prompt-changed');
       }
@@ -414,11 +532,51 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     });
   };
 
+  const peek = (items: readonly MaskItem[]): Promise<void> => {
+    checkConversation();
+    const target = conversation;
+    const peeking = generation;
+    return serial(async () => {
+      if (disposed || target === null || peeking !== generation) return;
+      const known = cacheFor(target);
+      const missing = items.filter(
+        (item) => known?.values.has(itemKey(item)) !== true,
+      );
+      if (missing.length === 0) return;
+      for (const batch of batches(missing)) {
+        const result = await messenger.send(
+          'vault.peek',
+          { conversationId: target.id, items: batch },
+          { timeoutMs: LOAD_TIMEOUT_MS },
+        );
+        if (peeking !== generation || isDisposed()) return;
+        if (!result.ok) return fail(result.error);
+        if (result.value.status !== 'ok') {
+          return fail(failureReason(result.value));
+        }
+        if (result.value.items.length !== batch.length) {
+          return fail('count-mismatch');
+        }
+        const cache = cacheOf(target, result.value.dateOffsetDays);
+        for (const [index, item] of result.value.items.entries()) {
+          const value = batch[index];
+          if (value !== undefined) {
+            cache.values.set(itemKey(value), preparedValue(item));
+          }
+        }
+      }
+    });
+  };
+
   const handleNotice = (notice: VaultNotice): void => {
     if (disposed || conversation === null) return;
     const current = conversation;
     if (notice.name === 'vault.changed') {
-      if (notice.conversationId === current.id) void load(current);
+      if (notice.conversationId === current.id) {
+        // Another tab stored values: looked-up results may be out of date.
+        prepared = null;
+        void load(current);
+      }
       return;
     }
     if (
@@ -429,6 +587,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     }
     // Deleted from the vault: forget the values here too.
     generation += 1;
+    prepared = null;
     if (current.urlId === null) pendingUsed = false;
     migration = null;
     status = 'empty';
@@ -454,10 +613,12 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     source,
     checkConversation,
     mask,
+    peek,
     isIssued: (value) => byStandIn.has(value.toLowerCase()),
     handleNotice,
     clear: () => {
       generation += 1;
+      prepared = null;
       status = 'empty';
       forget();
     },
@@ -472,6 +633,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       if (disposed) return;
       disposed = true;
       generation += 1;
+      prepared = null;
       migration = null;
       forget();
       listeners.clear();

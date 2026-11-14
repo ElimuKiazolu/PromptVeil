@@ -29,6 +29,7 @@ import {
 } from './mappings.ts';
 import {
   commitMask,
+  peekMask,
   prepareMask,
   type CommitEntry,
   type CommitResult,
@@ -58,11 +59,19 @@ export interface VaultService {
   insertMapping(input: NewMapping): Promise<InsertResult>;
   loadConversation(conversationId: string): Promise<LoadedConversation>;
   /** Masking, step 1: stored stand-ins and seeds (see mask.ts). */
-  prepareMask(request: PrepareRequest): Promise<PrepareResult>;
+  prepareMask(
+    request: PrepareRequest,
+  ): Promise<PrepareResult & { dateOffsetDays: number }>;
+  /** Step 1 without writing (while the user types). */
+  peekMask(
+    conversationId: string,
+    items: readonly RealValue[],
+  ): Promise<PrepareResult>;
   /** Masking, step 2: stores generated stand-ins (see mask.ts). */
   commitMask(
     conversationId: string,
     entries: readonly CommitEntry[],
+    reused?: readonly RealValue[],
   ): Promise<CommitResult>;
   /** Moves a pending chat to the ID the site assigned (see migrate.ts). */
   migrate(from: string, to: string): Promise<MigrationOutcome>;
@@ -163,8 +172,10 @@ export function createVaultService(deps: VaultDeps): VaultService {
     loadConversation: async (conversationId) =>
       loadConversation(await context(), conversationId),
     prepareMask: async (request) => prepareMask(await context(), request),
-    commitMask: async (conversationId, entries) =>
-      commitMask(await context(), conversationId, entries),
+    peekMask: async (conversationId, items) =>
+      peekMask(await context(), conversationId, items),
+    commitMask: async (conversationId, entries, reused) =>
+      commitMask(await context(), conversationId, entries, reused),
     migrate: async (from, to) => migrateConversation(await context(), from, to),
     deleteExpired: async (options) =>
       deleteExpired(await database(), now(), options),

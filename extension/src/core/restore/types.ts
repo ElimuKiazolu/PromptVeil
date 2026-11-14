@@ -16,7 +16,32 @@ export interface StandInMapping {
    * src/core/net/forms.ts); when absent, the compact form of `real`.
    */
   readonly netForms?: readonly string[];
+  /**
+   * Other writings of the stand-in that restore too (TR-X2), see
+   * variants.ts. Without it, only the stand-in as shown (any case) restores.
+   */
+  readonly variants?: StandInVariants;
 }
+
+/**
+ * How else a stand-in may come back in a reply.
+ * - 'layout' (cards, bank accounts, national IDs): the same letters and
+ *   digits with other separators, spacing or case; the real value comes back
+ *   in that layout. For cards also a mention of the last four digits next to
+ *   card words, when no other card stand-in ends in them.
+ * - 'phone': the national significant number with any national or
+ *   international prefix (or none) and any grouping; the real number comes
+ *   back with the prefix and grouping the reply used.
+ */
+export type StandInVariants =
+  | { readonly kind: 'layout'; readonly card: boolean }
+  | {
+      readonly kind: 'phone';
+      readonly callingCode: string;
+      /** National significant numbers, digits only, of equal length. */
+      readonly standInNumber: string;
+      readonly realNumber: string;
+    };
 
 /**
  * The mappings of the current conversation. `version` changes whenever the

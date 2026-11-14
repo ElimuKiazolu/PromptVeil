@@ -113,6 +113,7 @@ export default defineContentScript({
       // Any vault failure rejects, and the Send is blocked.
       mask: (items, issue) => session.mask(items, issue),
       isIssued: (value) => session.isIssued(value),
+      peek: (items) => session.peek(items),
       entityTypes: () => current.entityTypes,
       checkpoint: () => createCheckpoint(yielder, { signal: ctx.signal }),
       clock: () => performance.now(),
@@ -149,6 +150,8 @@ export default defineContentScript({
       draft: {
         prepare: async (text) => {
           await (await detection.ready()).prepare(text);
+          // The vault lookup a Send of this draft needs, done ahead.
+          await pipeline.prepare(text);
         },
         clear: () => {
           detection.current()?.clear();

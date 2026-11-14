@@ -366,6 +366,7 @@ describe('production protocol', () => {
       'vault.commit',
       'vault.load',
       'vault.migrate',
+      'vault.peek',
       'vault.prepare',
     ]);
   });

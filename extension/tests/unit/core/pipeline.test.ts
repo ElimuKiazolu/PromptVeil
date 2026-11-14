@@ -256,12 +256,13 @@ function scriptedVault(
     commit: (entries) => {
       const round = commits.length;
       commits.push(entries.map((entry) => entry.standIn));
-      return Promise.resolve(
-        entries.map((entry): CommittedValue => {
+      return Promise.resolve({
+        values: entries.map((entry): CommittedValue => {
           const kind = answer(entry.standIn, round);
           return kind === 'taken' ? { kind } : { kind, standIn: entry.standIn };
         }),
-      );
+        missing: 0,
+      });
     },
   };
 }
@@ -351,12 +352,13 @@ describe('issueStandIns', () => {
     const vault: IssueVault = {
       ...scriptedVault(() => 'inserted'),
       commit: (entries) =>
-        Promise.resolve(
-          entries.map(() => ({
+        Promise.resolve({
+          values: entries.map(() => ({
             kind: 'existing' as const,
             standIn: 'standin.9.abcd@example.net',
           })),
-        ),
+          missing: 0,
+        }),
     };
     expect(await issueStandIns([item('a')], vault, options())).toEqual([
       'standin.9.abcd@example.net',
