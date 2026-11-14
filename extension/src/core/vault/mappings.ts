@@ -312,6 +312,8 @@ export interface RestoreEntry {
   variants: readonly string[];
   parentId: string | null;
   real: string;
+  /** The real value's normal form (stored with it, encrypted). */
+  normalised: string;
 }
 
 export interface LoadedConversation {
@@ -345,8 +347,9 @@ export async function loadConversation(
       continue;
     }
     let real: string;
+    let normalised: string;
     try {
-      ({ value: real } = await decryptReal(
+      ({ value: real, normalised } = await decryptReal(
         context.crypto,
         context.keys.enc,
         record.realEnc,
@@ -369,6 +372,7 @@ export async function loadConversation(
       variants: record.variants,
       parentId: record.parentId,
       real,
+      normalised,
     });
   }
   return { entries, failed };

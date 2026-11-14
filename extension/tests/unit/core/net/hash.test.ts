@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createValueHasher,
+  createFormHasher,
   hmacSha256Hex,
   normaliseValue,
   randomHashKey,
@@ -68,37 +68,28 @@ describe('hmacSha256Hex', () => {
   });
 });
 
-describe('createValueHasher', () => {
+describe('createFormHasher', () => {
   const KEY_A = 'a1'.repeat(32);
   const KEY_B = 'b2'.repeat(32);
 
-  it('hashes the normalised value, so case and spacing do not matter', () => {
-    const hash = createValueHasher(KEY_A);
-    expect(hash('email', ' Dana@Example.COM ')).toBe(
-      hash('email', 'dana@example.com'),
-    );
-    expect(hash('email', 'dana@example.com')).toMatch(/^[0-9a-f]{64}$/);
+  it('hashes a compact form to 64 hex characters, keyed', () => {
+    const a = createFormHasher(KEY_A);
+    const b = createFormHasher(KEY_B);
+    expect(a('7400123456')).toMatch(/^[0-9a-f]{64}$/);
+    expect(a('7400123456')).toBe(a('7400123456'));
+    expect(a('7400123456')).not.toBe(b('7400123456'));
+    expect(a('7400123456')).not.toBe(a('7400123457'));
   });
 
-  it('gives different hashes for different keys and values', () => {
-    const a = createValueHasher(KEY_A);
-    const b = createValueHasher(KEY_B);
-    expect(a('email', 'dana@example.com')).not.toBe(
-      b('email', 'dana@example.com'),
+  it('never returns the form itself', () => {
+    expect(createFormHasher(KEY_A)('danawhitfieldexamplecom')).not.toContain(
+      'dana',
     );
-    expect(a('email', 'dana@example.com')).not.toBe(
-      a('email', 'ops@example.org'),
-    );
-  });
-
-  it('never returns the value itself', () => {
-    const hash = createValueHasher(KEY_A)('email', 'dana@example.com');
-    expect(hash).not.toContain('dana');
   });
 
   it('rejects malformed keys', () => {
-    expect(() => createValueHasher('short')).toThrow(RangeError);
-    expect(() => createValueHasher('A1'.repeat(32))).toThrow(RangeError);
+    expect(() => createFormHasher('short')).toThrow(RangeError);
+    expect(() => createFormHasher('A1'.repeat(32))).toThrow(RangeError);
   });
 });
 
@@ -112,6 +103,6 @@ describe('normaliseValue and randomHashKey', () => {
   it('builds a 32-byte hex key from the random source', () => {
     const key = randomHashKey((buffer) => buffer.fill(171));
     expect(key).toBe('ab'.repeat(32));
-    expect(() => createValueHasher(key)).not.toThrow();
+    expect(() => createFormHasher(key)).not.toThrow();
   });
 });

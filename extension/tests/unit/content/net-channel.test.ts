@@ -3,7 +3,7 @@ import { chatgptNetRules } from '@/src/adapters/chatgpt.ts';
 import { startNetBridge } from '@/src/content/net-bridge.ts';
 import type { StandInMapping } from '@/src/core/restore/index.ts';
 import { startMainChannel } from '@/src/net/channel.ts';
-import { installNetGuard } from '@/src/net/guard.ts';
+import { installNetGuard, VERIFY_TIMEOUT_MS } from '@/src/net/guard.ts';
 import type { NetWindow } from '@/src/net/wrappers.ts';
 import {
   NET_KEY_OFFER,
@@ -30,6 +30,25 @@ const DANA: StandInMapping = {
 };
 
 const VALID_KEY = 'ab'.repeat(32);
+
+/** MAIN-channel handlers that do nothing, with a real timer. */
+function handlers() {
+  return {
+    onKey: vi.fn(),
+    onAdd: vi.fn(),
+    setTimer: (handler: () => void, ms: number) => {
+      setTimeout(handler, ms);
+    },
+  };
+}
+
+// HMRC's tutorial NINO, masked: the net looks for its compact form.
+const NINO: StandInMapping = {
+  standIn: 'TN 48 21 93 B',
+  real: 'AB 12 34 56 C',
+  boundary: 'word',
+  netForms: ['ab123456c'],
+};
 
 function fakeWindow() {
   const sent: string[] = [];
@@ -70,9 +89,15 @@ function fakeWindow() {
     navigator: new FakeNavigator(),
     ProgressEvent: Event,
     location: { href: 'https://chatgpt.com/c/abc' },
-    setTimeout: (handler: () => void) => setTimeout(handler, 0),
+    setTimeout: (handler: () => void, ms?: number) => setTimeout(handler, ms),
+    performance: { now: () => performance.now() },
   };
-  return { win: win as unknown as NetWindow, sent, FakeXhr, FakeNavigator };
+  return {
+    win: win as unknown as NetWindow & { performance: { now(): number } },
+    sent,
+    FakeXhr,
+    FakeNavigator,
+  };
 }
 
 const messageBody = (text: string): string =>
@@ -96,7 +121,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
     const bridge = startNetBridge(doc);
     expect(bridge.isReady()).toBe(false);
     const onKey = vi.fn();
-    startMainChannel(doc, { onKey, onAdd: vi.fn() });
+    startMainChannel(doc, { ...handlers(), onKey });
     expect(bridge.isReady()).toBe(true);
     expect(onKey).toHaveBeenCalledTimes(1);
   });
@@ -104,7 +129,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
   it('completes when the MAIN-world net starts first', () => {
     const doc = documentAtStart();
     const onKey = vi.fn();
-    startMainChannel(doc, { onKey, onAdd: vi.fn() });
+    startMainChannel(doc, { ...handlers(), onKey });
     const bridge = startNetBridge(doc);
     expect(bridge.isReady()).toBe(true);
     expect(onKey).toHaveBeenCalledTimes(1);
@@ -116,7 +141,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
     const ready = vi.fn();
     bridge.onReady(ready);
     expect(ready).not.toHaveBeenCalled();
-    startMainChannel(doc, { onKey: vi.fn(), onAdd: vi.fn() });
+    startMainChannel(doc, handlers());
     expect(ready).toHaveBeenCalledTimes(1);
     bridge.onReady(ready);
     expect(ready).toHaveBeenCalledTimes(2);
@@ -144,7 +169,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
   it('cannot be completed by a key offer forged after page scripts can run', () => {
     const doc = documentAtStart();
     const onKey = vi.fn();
-    startMainChannel(doc, { onKey, onAdd: vi.fn() });
+    startMainChannel(doc, { ...handlers(), onKey });
     pageScriptsMayRun(doc);
     doc.dispatchEvent(new CustomEvent(NET_KEY_OFFER, { detail: VALID_KEY }));
     expect(onKey).not.toHaveBeenCalled();
@@ -153,7 +178,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
   it('accepts only the first key', () => {
     const doc = documentAtStart();
     const onKey = vi.fn();
-    startMainChannel(doc, { onKey, onAdd: vi.fn() });
+    startMainChannel(doc, { ...handlers(), onKey });
     doc.dispatchEvent(new CustomEvent(NET_KEY_OFFER, { detail: VALID_KEY }));
     doc.dispatchEvent(
       new CustomEvent(NET_KEY_OFFER, { detail: 'cd'.repeat(32) }),
@@ -165,7 +190,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
   it('ignores malformed key offers', () => {
     const doc = documentAtStart();
     const onKey = vi.fn();
-    startMainChannel(doc, { onKey, onAdd: vi.fn() });
+    startMainChannel(doc, { ...handlers(), onKey });
     for (const detail of ['short', 42, null, 'AB'.repeat(32)]) {
       doc.dispatchEvent(new CustomEvent(NET_KEY_OFFER, { detail }));
     }
@@ -177,7 +202,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
     pageScriptsMayRun(doc);
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const bridge = startNetBridge(doc);
-    startMainChannel(doc, { onKey: vi.fn(), onAdd: vi.fn() });
+    startMainChannel(doc, handlers());
     expect(bridge.isReady()).toBe(false);
     expect(
       info.mock.calls.some((c) => String(c[0]).includes('net.missing')),
@@ -188,7 +213,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
     const doc = documentAtStart();
     const additions: NetAddition[] = [];
     startMainChannel(doc, {
-      onKey: vi.fn(),
+      ...handlers(),
       onAdd: (a) => additions.push(a),
     });
     const bridge = startNetBridge(doc);
@@ -204,7 +229,9 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
     bridge.sync([DANA]);
     expect(additions).toHaveLength(1);
     expect(additions[0]?.standIns).toEqual(['standin.1@example.net']);
-    expect(additions[0]?.hashes[0]).toMatch(/^[0-9a-f]{64}$/);
+    const [form] = additions[0]?.forms ?? [];
+    expect(form?.length).toBe('danaexamplecom'.length);
+    expect(form?.hash).toMatch(/^[0-9a-f]{64}$/u);
     expect(JSON.stringify(seen)).not.toContain('dana');
   });
 
@@ -212,7 +239,7 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const doc = documentAtStart();
     const bridge = startNetBridge(doc);
-    const channel = startMainChannel(doc, { onKey: vi.fn(), onAdd: vi.fn() });
+    const channel = startMainChannel(doc, handlers());
     expect(bridge.isReady()).toBe(true);
     channel.report({
       event: 'net.blocked',
@@ -235,6 +262,8 @@ describe('installNetGuard', () => {
     const env = fakeWindow();
     installNetGuard(env.win, doc, chatgptNetRules);
     const bridge = startNetBridge(doc);
+    // The detector finds nothing to mask in any message, by default.
+    bridge.setVerifier(() => Promise.resolve(false));
     pageScriptsMayRun(doc);
     return { ...env, doc, bridge };
   }
@@ -349,5 +378,97 @@ describe('installNetGuard', () => {
       }),
     ).rejects.toThrow(TypeError);
     expect(sent).toEqual([]);
+  });
+
+  it('tier 2 blocks any masked type, in any writing', () => {
+    const { sent, bridge, FakeNavigator } = setUpGuard();
+    bridge.sync([NINO]);
+    for (const body of ['ni ab123456c', '{"n":"AB-12-34-56-C"}']) {
+      expect(new FakeNavigator().sendBeacon('https://x.example/', body)).toBe(
+        false,
+      );
+    }
+    expect(sent).toEqual([]);
+  });
+
+  it('a fetch message request waits for the verdict on its message text', async () => {
+    const { win, sent, bridge } = setUpGuard();
+    const asked: string[][] = [];
+    bridge.setVerifier((texts) => {
+      asked.push([...texts]);
+      return Promise.resolve(texts.some((t) => t.includes('AB 12 34 56 C')));
+    });
+    await expect(
+      win.fetch('/backend-api/f/conversation', {
+        method: 'POST',
+        body: messageBody('My NI number is AB 12 34 56 C'),
+      }),
+    ).rejects.toThrow(TypeError);
+    await win.fetch('/backend-api/f/conversation', {
+      method: 'POST',
+      body: messageBody('My NI number is TN 48 21 93 B'),
+    });
+    expect(sent).toEqual(['fetch']);
+    // Only the message text fields, not the rest of the body.
+    expect(asked.flat()).toContain('My NI number is AB 12 34 56 C');
+    expect(asked.flat()).not.toContain('next');
+  });
+
+  it('blocks a fetch message request without a verifier or when it fails', async () => {
+    const { win, sent, bridge } = setUpGuard();
+    bridge.setVerifier(() => Promise.reject(new Error('detection failed')));
+    await expect(
+      win.fetch('/backend-api/f/conversation', {
+        method: 'POST',
+        body: messageBody('hello'),
+      }),
+    ).rejects.toThrow(TypeError);
+    const fresh = documentAtStart();
+    const env = fakeWindow();
+    installNetGuard(env.win, fresh, chatgptNetRules);
+    startNetBridge(fresh);
+    pageScriptsMayRun(fresh);
+    await expect(
+      env.win.fetch('/backend-api/f/conversation', {
+        method: 'POST',
+        body: messageBody('hello'),
+      }),
+    ).rejects.toThrow(TypeError);
+    expect([...sent, ...env.sent]).toEqual([]);
+  });
+
+  it('blocks a fetch message request when no verdict comes in time', async () => {
+    vi.useFakeTimers();
+    try {
+      const { win, sent, bridge } = setUpGuard();
+      bridge.setVerifier(() => new Promise<boolean>(() => undefined));
+      const request = win.fetch('/backend-api/f/conversation', {
+        method: 'POST',
+        body: messageBody('hello'),
+      });
+      const outcome = request.then(
+        () => 'sent',
+        () => 'blocked',
+      );
+      await vi.advanceTimersByTimeAsync(VERIFY_TIMEOUT_MS);
+      expect(await outcome).toBe('blocked');
+      expect(sent).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports the verification time, never the text', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    const { win } = setUpGuard();
+    await win.fetch('/backend-api/f/conversation', {
+      method: 'POST',
+      body: messageBody('hello there'),
+    });
+    const lines = info.mock.calls.map((c) => String(c[0]));
+    expect(
+      lines.some((l) => / net\.verified ms=\d+\.\d block=false$/u.test(l)),
+    ).toBe(true);
+    expect(lines.join('\n')).not.toContain('hello');
   });
 });

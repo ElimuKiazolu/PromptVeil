@@ -5,6 +5,7 @@ import {
   isValidKey,
   netChannelEvent,
   parseAddition,
+  parseVerdict,
   type NetAddition,
   type NetReport,
 } from '@/src/shared/net-protocol.ts';
@@ -13,11 +14,18 @@ import { originalFunction } from './wrappers.ts';
 export interface MainChannel {
   /** Sends a report to the isolated side; dropped before the handshake. */
   report(report: NetReport): void;
+  /**
+   * Asks the isolated side whether message text may be sent. Resolves false
+   * (block) without an answer within `timeoutMs`, or before the handshake.
+   */
+  verify(texts: readonly string[], timeoutMs: number): Promise<boolean>;
 }
 
 export interface MainChannelHandlers {
   onKey(key: string): void;
   onAdd(addition: NetAddition): void;
+  /** Captured before page scripts run, so the page cannot stop a timeout. */
+  setTimer(handler: () => void, ms: number): void;
 }
 
 /**
@@ -40,11 +48,22 @@ export function startMainChannel(
   const CustomEventCtor = CustomEvent;
 
   let key: string | null = null;
+  let nextId = 0;
+  const pending = new Map<number, (allowed: boolean) => void>();
 
   const onAdd = (event: Event): void => {
     if (!(event instanceof CustomEventCtor)) return;
     const addition = parseAddition(event.detail);
     if (addition) handlers.onAdd(addition);
+  };
+
+  const onVerdict = (event: Event): void => {
+    if (!(event instanceof CustomEventCtor)) return;
+    const verdict = parseVerdict(event.detail);
+    if (!verdict) return;
+    const settle = pending.get(verdict.id);
+    pending.delete(verdict.id);
+    settle?.(!verdict.block);
   };
 
   const onOffer = (event: Event): void => {
@@ -55,6 +74,7 @@ export function startMainChannel(
     key = offered;
     removeListener.call(doc, NET_KEY_OFFER, onOffer);
     addListener.call(doc, netChannelEvent(offered, 'add'), onAdd);
+    addListener.call(doc, netChannelEvent(offered, 'verdict'), onVerdict);
     handlers.onKey(offered);
     dispatch.call(doc, new CustomEventCtor(netChannelEvent(offered, 'ready')));
   };
@@ -74,6 +94,24 @@ export function startMainChannel(
           detail: JSON.stringify(report),
         }),
       );
+    },
+    verify(texts, timeoutMs) {
+      if (key === null) return Promise.resolve(false);
+      const id = nextId;
+      nextId += 1;
+      const answer = new Promise<boolean>((resolve) => {
+        pending.set(id, resolve);
+        handlers.setTimer(() => {
+          if (pending.delete(id)) resolve(false);
+        }, timeoutMs);
+      });
+      dispatch.call(
+        doc,
+        new CustomEventCtor(netChannelEvent(key, 'verify'), {
+          detail: JSON.stringify({ id, texts }),
+        }),
+      );
+      return answer;
     },
   };
 }

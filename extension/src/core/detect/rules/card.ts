@@ -3,10 +3,13 @@
  * not part of a longer number, decimal or word. Valid cards (Luhn + brand
  * prefix) are confirmed. A UnionPay number (62, 16–19 digits) that fails Luhn
  * (some UnionPay ranges do not use it) is reported only with a card context
- * word nearby, and only as possible.
+ * word nearby, and only as possible. Published test card numbers (see
+ * reserved-values.ts) are not reported: they are no one's card, and the
+ * stand-in engine uses them.
  */
 import { isDigits } from '../checksum.ts';
 import { validateCard } from '../validators/card.ts';
+import { isTestCard } from '../validators/reserved-values.ts';
 import { stripGroupSeparators } from '../validators/separators.ts';
 import { INVALID, finding, type Rule } from './types.ts';
 
@@ -31,7 +34,12 @@ export const CARD_RULE: Rule = {
     }
   },
   validate(value, env) {
-    if (validateCard(value).valid) return finding(CARD_RULE, 'checksum');
+    const card = validateCard(value);
+    if (card.valid) {
+      return finding(CARD_RULE, 'checksum', {
+        reserved: isTestCard(card.digits),
+      });
+    }
     const digits = stripGroupSeparators(value, [' ', '-']);
     if (
       env.hasContext &&

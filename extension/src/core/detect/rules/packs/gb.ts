@@ -11,7 +11,10 @@
  * modulus 11 check digit over the first nine (weights 10 down to 2): 11 minus
  * the remainder, 11 becomes 0, and 10 means the number is invalid. Ten plain
  * digits count only with a context word nearby (one random run in eleven
- * passes the check).
+ * passes the check). 999 000 0000–999 999 9999 is the test range, "a range
+ * of numbers from which real NHS numbers will never be issued" (NHS England,
+ * e-Referral Service, "Synthetic data in live environments"): never anyone's
+ * number, so not reported; NHS stand-ins come from it.
  */
 import { weightedMod11 } from '../../checksum.ts';
 import { ID_REFERENCE_BEFORE } from '../negative.ts';
@@ -91,6 +94,8 @@ export const UK_NINO_RULE: Rule = {
 };
 
 const NHS_GROUPS = [3, 3, 4] as const;
+/** The NHS test range: 999 000 0000 to 999 999 9999. */
+export const NHS_TEST_PREFIX = '999';
 const NHS_WEIGHTS = [10, 9, 8, 7, 6, 5, 4, 3, 2];
 
 /** NHS check digit for the first nine digits, or null if there is none (10). */
@@ -109,14 +114,11 @@ export function isWellFormedNhsNumber(value: string): boolean {
   return nhsCheckDigit(read.digits.slice(0, 9)) === read.digits.charAt(9);
 }
 
-/**
- * Valid NHS number. The test range 999 000 0000–999 999 9999 is valid (and
- * detected): NHS England never issues it to patients, but synthetic records
- * in live systems use it.
- */
+/** Adds the issuance rules: not all one digit, not in the test range. */
 export function isValidNhsNumber(value: string): boolean {
   const read = groupedDigits(value, NHS_GROUPS);
   if (read === null || isRepeatedDigit(read.digits)) return false;
+  if (read.digits.startsWith(NHS_TEST_PREFIX)) return false;
   return isWellFormedNhsNumber(value);
 }
 
@@ -127,10 +129,13 @@ export const UK_NHS_RULE: Rule = {
   country: 'GB',
   find: digitGroupScanner(NHS_GROUPS),
   validate(value, env) {
-    if (!isValidNhsNumber(value)) return INVALID;
-    const plain = groupedDigits(value, NHS_GROUPS)?.plain ?? true;
-    if (plain && !env.hasContext) return INVALID;
-    return finding(UK_NHS_RULE, 'checksum');
+    const read = groupedDigits(value, NHS_GROUPS);
+    const testRange = read?.digits.startsWith(NHS_TEST_PREFIX) ?? false;
+    if (testRange ? !isWellFormedNhsNumber(value) : !isValidNhsNumber(value)) {
+      return INVALID;
+    }
+    if ((read?.plain ?? true) && !env.hasContext) return INVALID;
+    return finding(UK_NHS_RULE, 'checksum', { reserved: testRange });
   },
   context: {
     words: ['nhs', 'nhs number', 'nhs no', 'health service number', 'rhif gig'],
@@ -164,7 +169,10 @@ export const GB_PACK: CountryPack = {
       checkCharacters: nhsCheckDigit,
       isWellFormed: isWellFormedNhsNumber,
       isValid: isValidNhsNumber,
-      avoid: ['all digits the same'],
+      avoid: [
+        'all digits the same',
+        '999 000 0000 to 999 999 9999 (test range, never issued)',
+      ],
     },
   },
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createMasker,
+  createPipeline,
   fitsPrompt,
   issueStandIns,
   MAX_STAND_IN_ATTEMPTS,
@@ -9,13 +9,13 @@ import {
   type CommittedValue,
   type IssueVault,
   type StandInFactory,
-} from '@/src/core/masker.ts';
+} from '@/src/core/pipeline.ts';
 import type { MaskItem } from '@/src/shared/vault-protocol.ts';
 import { createMemoryMasker, numberedStandIns } from '../memory-masker.ts';
 import { detectEmailsOnly } from '../spike-detect.ts';
 import { detectEmails } from '@/src/core/detect/rules/email.ts';
 
-describe('createMasker', () => {
+describe('createPipeline', () => {
   it('replaces an email with a stand-in on example.net', async () => {
     const mask = createMemoryMasker({ detect: detectEmailsOnly }).transform;
     expect(await mask('Write to dana.whitfield@example.com today')).toBe(
@@ -188,25 +188,25 @@ describe('createMasker', () => {
   });
 
   it('rejects when the vault fails, so the send is blocked', async () => {
-    const { transform } = createMasker({
+    const { transform } = createPipeline({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value,
       engine: () => Promise.resolve(numberedStandIns),
       mask: () => Promise.reject(new Error('vault failed')),
       isIssued: () => false,
-      entityTypes: new Set(['EMAIL']),
+      entityTypes: () => new Set(['EMAIL']),
     });
     await expect(transform('a@example.com')).rejects.toThrow('vault failed');
   });
 
   it('rejects when the stand-in engine cannot load, so the send is blocked', async () => {
-    const { transform } = createMasker({
+    const { transform } = createPipeline({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value,
       engine: () => Promise.reject(new Error('load-failed')),
       mask: () => Promise.resolve([]),
       isIssued: () => false,
-      entityTypes: new Set(['EMAIL']),
+      entityTypes: () => new Set(['EMAIL']),
     });
     await expect(transform('a@example.com')).rejects.toThrow('load-failed');
   });
@@ -214,13 +214,13 @@ describe('createMasker', () => {
   it('rejects a reply with the wrong number of stand-ins', async () => {
     const mask = (items: readonly MaskItem[]) =>
       Promise.resolve(items.slice(1).map(() => 'standin.1@example.net'));
-    const { transform } = createMasker({
+    const { transform } = createPipeline({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value,
       engine: () => Promise.resolve(numberedStandIns),
       mask,
       isIssued: () => false,
-      entityTypes: new Set(['EMAIL']),
+      entityTypes: () => new Set(['EMAIL']),
     });
     await expect(transform('a@example.com b@example.org')).rejects.toThrow(
       RangeError,

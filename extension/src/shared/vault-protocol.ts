@@ -90,6 +90,8 @@ export interface LoadRequest {
 export interface LoadedMapping {
   standIn: string;
   real: string;
+  /** The real value's normal form (the request safety net needs it). */
+  normalised: string;
   type: EntityType;
 }
 
@@ -265,6 +267,7 @@ function isLoadedMapping(value: unknown): value is LoadedMapping {
     isObject(value) &&
     isBoundedString(value.standIn, MAX_VALUE_LENGTH) &&
     typeof value.real === 'string' &&
+    typeof value.normalised === 'string' &&
     isEntityType(value.type)
   );
 }

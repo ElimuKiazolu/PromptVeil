@@ -25,6 +25,7 @@ import { CA_PACK, isValidSin } from '@/src/core/detect/rules/packs/ca.ts';
 import {
   GB_PACK,
   isValidNhsNumber,
+  isWellFormedNhsNumber,
   isValidNino,
   nhsCheckDigit,
 } from '@/src/core/detect/rules/packs/gb.ts';
@@ -232,16 +233,27 @@ describe('UK_NINO', () => {
 
 describe('UK_NHS', () => {
   it.each([
-    // NHS England reserves 999 000 0000 to 999 999 9999 for testing.
+    // NHS number example used in NHS Digital documentation of the check
+    // digit, in each written form; more valid numbers come from the seeded
+    // property test below.
+    '943 476 5919',
+    '943-476-5919',
+    '9434765919',
+  ])('accepts %s', (value) => {
+    expect(isValidNhsNumber(value)).toBe(true);
+  });
+
+  it.each([
+    // NHS England's test range, never issued to anyone: well formed (NHS
+    // stand-ins come from it) but not reported.
     '999 000 0018',
     '999-000-0026',
     '9990000034',
     '999 111 2227',
     '999 000 0093',
-    // NHS number example used in NHS Digital documentation of the check digit.
-    '943 476 5919',
-  ])('accepts %s', (value) => {
-    expect(isValidNhsNumber(value)).toBe(true);
+  ])('rejects the test range: %s', (value) => {
+    expect(isWellFormedNhsNumber(value)).toBe(true);
+    expect(isValidNhsNumber(value)).toBe(false);
   });
 
   it.each([
@@ -257,13 +269,14 @@ describe('UK_NHS', () => {
   });
 
   it('needs a context word for ten plain digits', async () => {
-    expect(await detectIds('ticket 9990000018 closed')).toEqual([]);
-    expect(await detectIds('NHS number 9990000018')).toEqual([
-      ['UK_NHS', '9990000018', 'confirmed'],
+    expect(await detectIds('ticket 9434765919 closed')).toEqual([]);
+    expect(await detectIds('NHS number 9434765919')).toEqual([
+      ['UK_NHS', '9434765919', 'confirmed'],
     ]);
-    expect(await detectIds('Patient 999 000 0018 seen')).toEqual([
-      ['UK_NHS', '999 000 0018', 'confirmed'],
+    expect(await detectIds('Patient 943 476 5919 seen')).toEqual([
+      ['UK_NHS', '943 476 5919', 'confirmed'],
     ]);
+    expect(await detectIds('NHS number 999 000 0018')).toEqual([]);
   });
 
   it('checksum property: every single-digit change and neighbour swap is caught', () => {
@@ -274,7 +287,7 @@ describe('UK_NHS', () => {
       const check = nhsCheckDigit(payload);
       if (check === null) continue;
       const nhs = `${payload}${check}`;
-      if (/^(\d)\1*$/u.test(nhs)) continue;
+      if (/^(\d)\1*$/u.test(nhs) || nhs.startsWith('999')) continue;
       numbers += 1;
       expect(isValidNhsNumber(nhs), nhs).toBe(true);
       for (const changed of substitutions(nhs)) {
@@ -407,7 +420,7 @@ describe('BR_CPF', () => {
 describe('packs together', () => {
   it('the four packs run through the detector with their own country', async () => {
     const text =
-      'SSN 536-90-4399, NI number AB 12 34 56 C, NHS 999 000 0018, SIN 123 456 782, CPF 390.533.447-05.';
+      'SSN 536-90-4399, NI number AB 12 34 56 C, NHS 943 476 5919, SIN 123 456 782, CPF 390.533.447-05.';
     const detections = await detectRules(text, {
       homeRegions: [],
       entityTypes: IDS,

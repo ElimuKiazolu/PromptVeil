@@ -1,8 +1,10 @@
+import { compactForm, MIN_FORM_LENGTH } from '@/src/core/net/compact.ts';
 import {
-  createValueHasher,
+  createFormHasher,
   normaliseValue,
   randomHashKey,
 } from '@/src/core/net/hash.ts';
+import { createRollingHash, rollingBase } from '@/src/core/net/rolling.ts';
 import type { StandInMapping } from '@/src/core/restore/index.ts';
 import { devlog } from '@/src/shared/devlog.ts';
 import {
@@ -11,8 +13,15 @@ import {
   isHandshakeWindowOpen,
   netChannelEvent,
   parseReport,
+  parseVerifyRequest,
   type NetAddition,
 } from '@/src/shared/net-protocol.ts';
+
+/**
+ * Decides whether message text may be sent: true blocks it (it holds a value
+ * that should have been masked). A rejection blocks it too.
+ */
+export type MessageVerifier = (texts: readonly string[]) => Promise<boolean>;
 
 export interface NetBridge {
   /** True once the MAIN-world net confirmed the handshake. */
@@ -20,11 +29,22 @@ export interface NetBridge {
   /** Runs `callback` when the net is ready (at once if it already is). */
   onReady(callback: () => void): void;
   /**
-   * Gives the net every mapping it has not seen yet: a keyed hash of the real
-   * value and the stand-in. Synchronous, so the net knows a value before any
-   * request could carry it.
+   * Gives the net every mapping it has not seen yet: the keyed forms of the
+   * real value and (emails) the stand-in. Synchronous, so the net knows a
+   * value before any request could carry it.
    */
   sync(mappings: readonly StandInMapping[]): void;
+  /**
+   * Answers the net's verify requests for message text sent with fetch.
+   * Until a verifier is set, every such request is blocked.
+   */
+  setVerifier(verifier: MessageVerifier): void;
+}
+
+function formsOf(mapping: StandInMapping): readonly string[] {
+  if (mapping.netForms !== undefined) return mapping.netForms;
+  const form = compactForm(mapping.real);
+  return form.length >= MIN_FORM_LENGTH ? [form] : [];
 }
 
 /**
@@ -35,8 +55,10 @@ export interface NetBridge {
  */
 export function startNetBridge(doc: Document = document): NetBridge {
   const key = randomHashKey((bytes) => crypto.getRandomValues(bytes));
-  const hash = createValueHasher(key);
+  const hash = createFormHasher(key);
+  const rolling = createRollingHash(rollingBase(key));
   let ready = false;
+  let verifier: MessageVerifier | null = null;
   const waiting: (() => void)[] = [];
   const synced = new Set<string>();
 
@@ -48,24 +70,43 @@ export function startNetBridge(doc: Document = document): NetBridge {
     },
     sync(mappings) {
       if (!ready) return;
-      const addition: NetAddition = { hashes: [], standIns: [] };
+      const addition: NetAddition = { forms: [], standIns: [] };
       for (const mapping of mappings) {
         if (synced.has(mapping.standIn)) continue;
         synced.add(mapping.standIn);
-        // Only emails are recognised by the net so far; other kinds follow
-        // with the stand-in engine.
-        if (mapping.boundary !== 'email') continue;
-        addition.hashes.push(hash('email', mapping.real));
-        addition.standIns.push(normaliseValue('email', mapping.standIn));
+        for (const form of formsOf(mapping)) {
+          addition.forms.push({
+            length: form.length,
+            roll: rolling.of(form),
+            hash: hash(form),
+          });
+        }
+        // Tier 1's email check lets the email stand-ins through.
+        if (mapping.boundary === 'email') {
+          addition.standIns.push(normaliseValue('email', mapping.standIn));
+        }
       }
-      if (addition.hashes.length === 0) return;
+      if (addition.forms.length === 0 && addition.standIns.length === 0) {
+        return;
+      }
       doc.dispatchEvent(
         new CustomEvent(netChannelEvent(key, 'add'), {
           detail: JSON.stringify(addition),
         }),
       );
-      devlog('net.synced', { count: addition.hashes.length });
+      devlog('net.synced', { count: addition.forms.length });
     },
+    setVerifier(next) {
+      verifier = next;
+    },
+  };
+
+  const answer = (id: number, block: boolean): void => {
+    doc.dispatchEvent(
+      new CustomEvent(netChannelEvent(key, 'verdict'), {
+        detail: JSON.stringify({ id, block }),
+      }),
+    );
   };
 
   if (!isHandshakeWindowOpen(doc)) {
@@ -98,6 +139,25 @@ export function startNetBridge(doc: Document = document): NetBridge {
     if (!report) return;
     const { event: name, ...details } = report;
     devlog(name, details);
+  });
+  doc.addEventListener(netChannelEvent(key, 'verify'), (event) => {
+    if (!(event instanceof CustomEvent)) return;
+    const request = parseVerifyRequest(event.detail);
+    if (!request) return;
+    const current = verifier;
+    if (current === null) {
+      answer(request.id, true);
+      return;
+    }
+    current(request.texts).then(
+      (block) => {
+        answer(request.id, block);
+      },
+      (error: unknown) => {
+        devlog('net.failed', { error });
+        answer(request.id, true);
+      },
+    );
   });
   doc.addEventListener(NET_MAIN_HELLO, onHello);
   offer();

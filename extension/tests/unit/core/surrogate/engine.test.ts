@@ -24,8 +24,10 @@ import {
 } from '@/src/core/surrogate/engine.ts';
 import { alphanumerics } from '@/src/core/surrogate/layout.ts';
 import { isReservedPhone } from '@/src/core/surrogate/phone.ts';
-import { AWS_EXAMPLE_ACCESS_KEY_ID } from '@/src/core/surrogate/secret.ts';
-import { TEST_CARDS } from '@/src/core/surrogate/card.ts';
+import {
+  AWS_EXAMPLE_ACCESS_KEY_IDS,
+  TEST_CARDS,
+} from '@/src/core/detect/validators/reserved-values.ts';
 import type { StandInRequest } from '@/src/core/surrogate/types.ts';
 import type { CountryCode } from '@/src/shared/country.ts';
 import type { EntitySubtype, EntityType } from '@/src/shared/entities.ts';
@@ -316,7 +318,11 @@ const CASES: Record<string, Case> = {
     subtype: null,
     country: null,
     values: [
-      ...Object.values(SECRET_TOKENS),
+      // The GitHub token first: AWS keys have reserved stand-ins.
+      SECRET_TOKENS.GITHUB_TOKEN ?? '',
+      SECRET_TOKENS.GOOGLE_API_KEY ?? '',
+      SECRET_TOKENS.SLACK_TOKEN ?? '',
+      SECRET_TOKENS.AWS_ACCESS_KEY ?? '',
       // Made up: a generic high-entropy key, a hexadecimal key, and an
       // assigned password (no vendor format).
       'Zq8fK2mVx9LpR4tW7nB3cY6hJ1dG5sQe',
@@ -548,31 +554,30 @@ describe('reserved ranges', () => {
     }
   });
 
-  it('NHS 999, Stripe test cards and the AWS example key are detected (documented)', async () => {
+  it('NHS 999, test card and AWS example stand-ins are not detected either', async () => {
     const nhs = generateStandIn(
       request('NATIONAL_ID', 'UK_NHS', 'GB', '943 476 5919'),
       seed(2),
       0,
     );
     expect(nhs?.value).toMatch(/^999 \d{3} \d{4}$/u);
-    expect(await detected(`NHS ${nhs?.value ?? ''}`, 'GB')).toEqual([
-      'NATIONAL_ID/UK_NHS',
-    ]);
+    expect(await detected(`NHS ${nhs?.value ?? ''}`, 'GB')).toEqual([]);
     const card = generateStandIn(
       request('CARD', null, null, '4111 1111 1111 1111'),
       seed(2),
       0,
     );
     expect(TEST_CARDS.visa).toContain(alphanumerics(card?.value ?? ''));
-    expect(await detected(`card ${card?.value ?? ''}`, 'GB')).toEqual([
-      'CARD/-',
-    ]);
-    const aws = generateStandIn(
-      request('SECRET', null, null, `AKIA${'Q'.repeat(15)}7`),
-      seed(2),
-      0,
-    );
-    expect(aws?.value).toBe(AWS_EXAMPLE_ACCESS_KEY_ID);
+    expect(await detected(`card ${card?.value ?? ''}`, 'GB')).toEqual([]);
+    const awsKey = request('SECRET', null, null, `AKIA${'Q'.repeat(15)}7`);
+    expect(
+      [0, 1].map((attempt) => generateStandIn(awsKey, seed(2), attempt)?.value),
+    ).toEqual(AWS_EXAMPLE_ACCESS_KEY_IDS);
+    expect(generateStandIn(awsKey, seed(2), 2)?.reserved).toBe(false);
+    for (const key of AWS_EXAMPLE_ACCESS_KEY_IDS) {
+      expect(await detected(`key ${key}`, 'GB')).toEqual([]);
+      expect(await detected(`aws_access_key_id = ${key}`, 'GB')).toEqual([]);
+    }
   });
 
   it('moves on to new test cards attempt by attempt, then to random numbers', () => {

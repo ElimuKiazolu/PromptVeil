@@ -1,12 +1,15 @@
 /**
- * The masker: replaces each detected value in a prompt with its stand-in.
+ * The send pipeline: replaces each confirmed detection in a prompt with its
+ * stand-in (TR §3, outbound, rules only until the NER model and Review).
  *
- * Stand-ins come from the vault in two steps (see src/core/vault/mask.ts):
- * the vault returns each value's stored stand-in or its seed; new stand-ins
- * are generated here by the stand-in engine (from the detection module),
- * checked against the prompt (TR-S3), and committed; a stand-in the vault
- * reports as taken moves to the next attempt. Any failure rejects, so the
- * send is blocked.
+ * detect (settings: types, packs, home regions) → confirmed items of the
+ * masked types, each distinct value once → vault prepare → generate (sliced,
+ * so no task runs long) → prompt checks → vault commit (a taken stand-in
+ * moves that value to its next attempt) → rewrite. Any failure rejects, so
+ * the send is blocked and the prompt stays as it was.
+ *
+ * "Possible" detections are not masked until the Review panel (P9); they are
+ * counted in the report.
  *
  * TR-S3 checks made here (the vault checks stored stand-ins and stored real
  * values): a stand-in must not equal any value detected in the prompt (of
@@ -16,18 +19,22 @@
  */
 import type { Detection, EntityType } from '../shared/entities.ts';
 import type { MaskItem } from '../shared/vault-protocol.ts';
+import type { Checkpoint } from './detect/schedule.ts';
 import { isSpikeStandIn } from './spike-standin.ts';
 import type { StandIn, StandInRequest } from './surrogate/types.ts';
 
 /** Attempts per value before the send is blocked. */
 export const MAX_STAND_IN_ATTEMPTS = 20;
 
-/**
- * Types masked on live sites. Only EMAIL until P6 switches on the other
- * types that have stand-in generators (PHONE, CARD, IBAN, SECRET,
- * NATIONAL_ID).
- */
-export const LIVE_ENTITY_TYPES: ReadonlySet<EntityType> = new Set(['EMAIL']);
+/** Types with stand-in generators: the types masked live. */
+export const MASKABLE_TYPES: ReadonlySet<EntityType> = new Set<EntityType>([
+  'EMAIL',
+  'PHONE',
+  'CARD',
+  'BANK',
+  'SECRET',
+  'NATIONAL_ID',
+]);
 
 export type PreparedValue =
   | { kind: 'existing'; standIn: string }
@@ -62,6 +69,43 @@ export class StandInsExhaustedError extends Error {
     super('exhausted');
     this.name = 'StandInsExhaustedError';
   }
+}
+
+/** Time spent per phase of one send, in ms. */
+export interface PipelineTimings {
+  rules: number;
+  prepare: number;
+  generate: number;
+  commit: number;
+  total: number;
+}
+
+export interface PipelineReport {
+  timings: PipelineTimings;
+  /** Distinct values masked. */
+  masked: number;
+  /** "Possible" detections of masked types, left as they are. */
+  possible: number;
+}
+
+/**
+ * True for a detection the pipeline masks: a confirmed value of a masked
+ * type that is not already a stand-in (issued in this conversation, or the
+ * email stand-in format of an earlier page load). The request safety net's
+ * message check uses the same rule, so it blocks exactly what a send would
+ * have masked.
+ */
+export function needsMasking(
+  detection: Detection,
+  types: ReadonlySet<EntityType>,
+  isIssued: (value: string) => boolean,
+): boolean {
+  return (
+    types.has(detection.type) &&
+    detection.status === 'confirmed' &&
+    !isIssued(detection.value) &&
+    !isSpikeStandIn(detection.value)
+  );
 }
 
 /** Letters and digits, lower case: how stand-ins are compared with text. */
@@ -126,6 +170,18 @@ interface Pending {
   attempt: number;
 }
 
+export interface IssueOptions {
+  standIn: StandInFactory;
+  fits: (item: MaskItem, standIn: StandIn) => boolean;
+  now: number;
+  /** Called between values, so long runs of generation yield (8 ms slices). */
+  checkpoint?: Checkpoint;
+  /** Monotonic ms clock for the timings. */
+  clock?: () => number;
+  /** Receives the time spent in each step (added up over rounds). */
+  timings?: Pick<PipelineTimings, 'prepare' | 'generate' | 'commit'>;
+}
+
 /**
  * One stand-in per item, in order: stored ones as they are, new ones
  * generated, checked and committed, retrying taken ones with the next
@@ -135,13 +191,13 @@ interface Pending {
 export async function issueStandIns(
   items: readonly MaskItem[],
   vault: IssueVault,
-  options: {
-    standIn: StandInFactory;
-    fits: (item: MaskItem, standIn: StandIn) => boolean;
-    now: number;
-  },
+  options: IssueOptions,
 ): Promise<string[]> {
+  const clock = options.clock ?? (() => 0);
+  const timings = options.timings ?? { prepare: 0, generate: 0, commit: 0 };
+  let started = clock();
   const prepared = await vault.prepare(items);
+  timings.prepare += clock() - started;
   if (prepared.values.length !== items.length) {
     throw new RangeError('one prepared value per item expected');
   }
@@ -162,6 +218,9 @@ export async function issueStandIns(
     );
     const entries: CommitEntry[] = [];
     for (const entry of pending) {
+      const waiting = options.checkpoint?.();
+      if (waiting !== undefined) await waiting;
+      started = clock();
       const request: StandInRequest = {
         ...entry.item,
         dateOffsetDays: prepared.dateOffsetDays,
@@ -188,8 +247,11 @@ export async function issueStandIns(
         }
         entry.attempt += 1;
       }
+      timings.generate += clock() - started;
     }
+    started = clock();
     const committed = await vault.commit(entries);
+    timings.commit += clock() - started;
     if (committed.length !== entries.length) {
       throw new RangeError('one commit result per entry expected');
     }
@@ -213,7 +275,7 @@ export async function issueStandIns(
   });
 }
 
-export interface MaskerOptions {
+export interface PipelineOptions {
   /** The rule detector run on a prompt (the detection module's analyzer). */
   detect: (text: string) => Promise<readonly Detection[]>;
   /** The vault normal form of a detection. */
@@ -233,13 +295,20 @@ export interface MaskerOptions {
   ) => Promise<readonly string[]>;
   /** True for a stand-in already issued in the current conversation. */
   isIssued: (value: string) => boolean;
-  /** Confirmed detections of these types are masked. */
-  entityTypes: ReadonlySet<EntityType>;
+  /** The types masked now (settings, limited to MASKABLE_TYPES). */
+  entityTypes: () => ReadonlySet<EntityType>;
+  /** A fresh checkpoint per send, for slicing generation. */
+  checkpoint?: () => Checkpoint;
+  /** Monotonic ms clock (timings). */
+  clock?: () => number;
+  /** Wall-clock ms (birth-date shifts). */
   now?: () => number;
+  /** Receives each masked send's report (counts and timings only). */
+  report?: (report: PipelineReport) => void;
 }
 
-export interface Masker {
-  /** Replaces each detected value with its stand-in. */
+export interface Pipeline {
+  /** Replaces each confirmed value of a masked type with its stand-in. */
   transform: (text: string) => Promise<string>;
 }
 
@@ -248,26 +317,25 @@ function itemKey(item: MaskItem): string {
   return JSON.stringify([item.type, item.subtype, item.normalised]);
 }
 
-export function createMasker(options: MaskerOptions): Masker {
-  const { detect, normalise, isIssued, entityTypes } = options;
+export function createPipeline(options: PipelineOptions): Pipeline {
+  const { detect, normalise, isIssued } = options;
+  const clock = options.clock ?? (() => 0);
   const now = options.now ?? Date.now;
 
   const transform = async (text: string): Promise<string> => {
+    const started = clock();
     const detections = await detect(text);
+    const rules = clock() - started;
+    // Read after detection, which waits for the settings to load.
+    const types = options.entityTypes();
     const spans: { detection: Detection; key: string }[] = [];
     const items = new Map<string, MaskItem>();
+    let possible = 0;
     for (const detection of detections) {
-      if (
-        !entityTypes.has(detection.type) ||
-        detection.status !== 'confirmed'
-      ) {
-        continue;
+      if (types.has(detection.type) && detection.status === 'possible') {
+        possible += 1;
       }
-      // A stand-in (edited or regenerated message, or one from an earlier
-      // page load) is left as it is rather than masked a second time.
-      if (isIssued(detection.value) || isSpikeStandIn(detection.value)) {
-        continue;
-      }
+      if (!needsMasking(detection, types, isIssued)) continue;
       const item: MaskItem = {
         type: detection.type,
         subtype: detection.subtype,
@@ -280,7 +348,18 @@ export function createMasker(options: MaskerOptions): Masker {
       if (!items.has(key)) items.set(key, item);
       spans.push({ detection, key });
     }
-    if (spans.length === 0) return text;
+    const timings: PipelineTimings = {
+      rules,
+      prepare: 0,
+      generate: 0,
+      commit: 0,
+      total: 0,
+    };
+    if (spans.length === 0) {
+      timings.total = clock() - started;
+      options.report?.({ timings, masked: 0, possible });
+      return text;
+    }
 
     const unique = [...items.entries()];
     const uniqueItems = unique.map(([, item]) => item);
@@ -291,6 +370,9 @@ export function createMasker(options: MaskerOptions): Masker {
         standIn: engine,
         fits: (item, standIn) => fitsPrompt(view, item.type, standIn),
         now: now(),
+        checkpoint: options.checkpoint?.(),
+        clock,
+        timings,
       }),
     );
     if (standIns.length !== unique.length) {
@@ -300,6 +382,7 @@ export function createMasker(options: MaskerOptions): Masker {
       unique.map(([key], index) => [key, standIns[index]] as const),
     );
 
+    // One pass over the prompt, whatever the number of replacements.
     let out = '';
     let cursor = 0;
     for (const { detection, key } of spans) {
@@ -308,6 +391,8 @@ export function createMasker(options: MaskerOptions): Masker {
       out += text.slice(cursor, detection.start) + standIn;
       cursor = detection.end;
     }
+    timings.total = clock() - started;
+    options.report?.({ timings, masked: unique.length, possible });
     return out + text.slice(cursor);
   };
 

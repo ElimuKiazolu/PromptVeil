@@ -98,6 +98,7 @@ export function installInterceptor({
   const process = async (
     composer: Composer,
     original: string,
+    started: number,
   ): Promise<void> => {
     let edited = false;
     try {
@@ -112,12 +113,17 @@ export function installInterceptor({
       if (composer.readPrompt() !== original) {
         throw new SendAbort('prompt-changed');
       }
+      const writing = performance.now();
       if (masked !== original) {
         edited = true;
         await composer.writePrompt(masked);
       }
+      const written = performance.now();
       send(composer);
-      devlog(edited ? 'send.masked' : 'send.passthrough');
+      devlog(edited ? 'send.masked' : 'send.passthrough', {
+        // From the intercepted key or click to the send.
+        timings: { write: written - writing, total: written - started },
+      });
     } catch (error) {
       devlog('send.blocked', { reason: reasonOf(error), error });
       if (edited) await restore(composer, original);
@@ -163,8 +169,9 @@ export function installInterceptor({
     block(event);
     devlog('send.intercepted');
     busy = true;
+    const started = performance.now();
     setTimeout(() => {
-      void process(composer, original).finally(() => {
+      void process(composer, original, started).finally(() => {
         busy = false;
       });
     }, 0);

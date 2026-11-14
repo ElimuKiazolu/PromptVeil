@@ -8,8 +8,8 @@
  *   the token is hexadecimal; punctuation stays in place. The result must be
  *   recognised as the same kind (vendor format, or the generic high-entropy
  *   rule) when the real value was.
- * - AWS access key IDs: the first attempt is AWS's documented example key ID,
- *   AKIAIOSFODNN7EXAMPLE (AWS IAM documentation, "Managing access keys").
+ * - AWS access key IDs: the first attempts are AWS's documented example key
+ *   IDs (see reserved-values.ts; the detector skips them).
  * - JWTs: a header with the real algorithm ({"alg":…,"typ":"JWT"}), a
  *   random {"sub":…} payload of about the same length, a random signature
  *   of the same length (empty stays empty).
@@ -23,6 +23,7 @@ import {
   validateSecret,
   type SecretKind,
 } from '../detect/validators/secret.ts';
+import { AWS_EXAMPLE_ACCESS_KEY_IDS } from '../detect/validators/reserved-values.ts';
 import { DIGITS, LOWER, UPPER, type Rng } from './rng.ts';
 import type { Generator } from './types.ts';
 
@@ -52,8 +53,6 @@ const VENDOR_PREFIXES = [
   'AIza',
   'sk-',
 ];
-
-export const AWS_EXAMPLE_ACCESS_KEY_ID = 'AKIAIOSFODNN7EXAMPLE';
 
 const RANDOM_DRAWS = 32;
 const BASE64 = `${UPPER}${LOWER}${DIGITS}+/`;
@@ -198,14 +197,15 @@ export const secretStandIn: Generator = ({
 }) => {
   const real = request.value;
   const kind = kindOf(real);
+  const examples = AWS_EXAMPLE_ACCESS_KEY_IDS.filter((key) => key !== real);
   if (
     kind === 'aws-access-key' &&
     reservedAllowed &&
-    attempt === 0 &&
     real.startsWith('AKIA') &&
-    real !== AWS_EXAMPLE_ACCESS_KEY_ID
+    attempt < examples.length
   ) {
-    return { value: AWS_EXAMPLE_ACCESS_KEY_ID, reserved: true };
+    const example = examples[attempt];
+    if (example !== undefined) return { value: example, reserved: true };
   }
   for (let draw = 0; draw < RANDOM_DRAWS; draw += 1) {
     const candidate =

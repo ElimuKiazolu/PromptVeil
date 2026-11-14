@@ -15,7 +15,7 @@ import {
   createVaultService,
   type VaultService,
 } from '@/src/core/vault/service.ts';
-import { createMasker, issueStandIns } from '@/src/core/masker.ts';
+import { createPipeline, issueStandIns } from '@/src/core/pipeline.ts';
 import { generateStandIn } from '@/src/core/surrogate/engine.ts';
 import {
   createMessenger,
@@ -182,7 +182,13 @@ describe('vault session', () => {
       expect(after.session.state().status).toBe('ready');
     });
     expect(after.session.source.mappings()).toEqual([
-      { standIn, real: DANA.value, boundary: 'email' },
+      {
+        standIn,
+        real: DANA.value,
+        boundary: 'email',
+        // What the request safety net looks for.
+        netForms: ['danawhitfieldexamplecom'],
+      },
     ]);
     expect(after.log).toEqual(['net 1', 'source 1']);
   });
@@ -478,6 +484,7 @@ describe('vault session in the page', () => {
     onReady: (callback) => {
       callback();
     },
+    setVerifier: () => undefined,
     sync: (mappings) => {
       synced.push(mappings.length);
     },
@@ -486,13 +493,13 @@ describe('vault session in the page', () => {
   function startPage(w: World, wrap?: (send: Send) => Send) {
     const h = setUpPage();
     const s = openSession(w, CONV_URL, wrap);
-    const masker = createMasker({
+    const masker = createPipeline({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value.toLowerCase(),
       engine: () => Promise.resolve(generateStandIn),
       mask: (items, issue) => s.session.mask(items, issue),
       isIssued: (value) => s.session.isIssued(value),
-      entityTypes: new Set(['EMAIL']),
+      entityTypes: () => new Set(['EMAIL']),
     });
     const controller = new AbortController();
     const synced: number[] = [];

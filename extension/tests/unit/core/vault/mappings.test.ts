@@ -339,6 +339,7 @@ describe('loadConversation', () => {
       variants: ['standin.one'],
       parentId: null,
       real: EMAIL.value,
+      normalised: EMAIL.normalised,
     });
   });
 

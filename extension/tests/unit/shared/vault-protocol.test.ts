@@ -190,10 +190,18 @@ describe('vault message shapes', () => {
     expect(
       load.response({
         status: 'ok',
-        mappings: [{ standIn: 's', real: 'r', type: 'EMAIL' }],
+        mappings: [{ standIn: 's', real: 'r', normalised: 'r', type: 'EMAIL' }],
         failed: 0,
       }),
     ).toBe(true);
+    // A mapping without its normal form is malformed.
+    expect(
+      load.response({
+        status: 'ok',
+        mappings: [{ standIn: 's', real: 'r', type: 'EMAIL' }],
+        failed: 0,
+      }),
+    ).toBe(false);
     expect(load.response({ status: 'ok', mappings: [], failed: -1 })).toBe(
       false,
     );

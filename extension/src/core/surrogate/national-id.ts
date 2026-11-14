@@ -11,8 +11,7 @@
  *   TN + six digits + A–D was never any number. The detector rejects them.
  * - UK_NHS: 999 000 0000–999 999 9999, "a range of numbers from which real
  *   NHS numbers will never be issued" (NHS England, e-Referral Service,
- *   "Synthetic data in live environments"). Valid, so the detector still
- *   finds them (it treats the range as valid test data).
+ *   "Synthetic data in live environments"). The detector rejects them.
  * Every other subtype has no published never-issued or test range that
  * could be confirmed, so its stand-ins are random valid values.
  *
@@ -35,7 +34,7 @@ import {
 import { cpfCheckDigits } from '../detect/rules/packs/br.ts';
 import { hasValidRepetition } from '../detect/rules/packs/de.ts';
 import { nirKey } from '../detect/rules/packs/fr.ts';
-import { nhsCheckDigit } from '../detect/rules/packs/gb.ts';
+import { NHS_TEST_PREFIX, nhsCheckDigit } from '../detect/rules/packs/gb.ts';
 import { isPalindrome } from '../detect/rules/packs/in.ts';
 import {
   CF_MONTHS,
@@ -135,7 +134,7 @@ const nino: IdGenerator = ({ rng, reservedAllowed }) => {
 const nhs: IdGenerator = ({ rng, reservedAllowed }) => {
   const characters = retry(() => {
     const payload = reservedAllowed
-      ? `999${rng.chars(DIGITS, 6)}`
+      ? `${NHS_TEST_PREFIX}${rng.chars(DIGITS, 6)}`
       : `${rng.between(1, 8).toString()}${rng.chars(DIGITS, 8)}`;
     const check = nhsCheckDigit(payload);
     return check === null ? null : payload + check;

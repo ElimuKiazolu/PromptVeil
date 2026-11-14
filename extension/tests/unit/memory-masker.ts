@@ -3,12 +3,12 @@ import type {
   StandInSource,
 } from '@/src/core/restore/index.ts';
 import {
-  createMasker,
+  createPipeline,
   type CommittedValue,
   type IssueVault,
   type PreparedValue,
   type StandInFactory,
-} from '@/src/core/masker.ts';
+} from '@/src/core/pipeline.ts';
 import type { Detection } from '@/src/shared/entities.ts';
 import type { MaskItem } from '@/src/shared/vault-protocol.ts';
 
@@ -82,13 +82,13 @@ export function createMemoryMasker(options: {
     },
   };
 
-  const masker = createMasker({
+  const masker = createPipeline({
     detect: options.detect,
     normalise: (detection) => detection.value.toLowerCase(),
     engine: () => Promise.resolve(numberedStandIns),
     mask: (_items, issue) => issue(vault),
     isIssued: (value) => usedStandIns.has(value.toLowerCase()),
-    entityTypes: new Set(['EMAIL']),
+    entityTypes: () => new Set(['EMAIL']),
   });
 
   return {

@@ -2,16 +2,25 @@ import { createChatGptAdapter } from '@/src/adapters/chatgpt.ts';
 import { createLazyDetection } from '@/src/content/detection-loader.ts';
 import { startInstance } from '@/src/content/instance.ts';
 import { startNetBridge } from '@/src/content/net-bridge.ts';
+import {
+  DEFAULT_PIPELINE_SETTINGS,
+  effectiveHomeRegions,
+  watchSettings,
+  type PipelineSettings,
+} from '@/src/content/settings.ts';
 import { vaultLifecycle } from '@/src/content/vault-lifecycle.ts';
 import { createVaultSession } from '@/src/content/vault-session.ts';
 import { createMainThreadYielder } from '@/src/content/yielder.ts';
 import { createCheckpoint } from '@/src/core/detect/schedule.ts';
-import { LIVE_ENTITY_TYPES, createMasker } from '@/src/core/masker.ts';
-import { regionsFromLanguages } from '@/src/shared/country.ts';
+import type { DetectionConfig } from '@/src/core/detect/bundle.ts';
+import { createPipeline, needsMasking } from '@/src/core/pipeline.ts';
+import {
+  regionsFromLanguages,
+  type CountryCode,
+} from '@/src/shared/country.ts';
 import { devlog } from '@/src/shared/devlog.ts';
 import { isExtensionContextValid } from '@/src/shared/extension-context.ts';
 import { createMessenger, PROTOCOL } from '@/src/shared/messaging.ts';
-import { DEFAULT_SETTINGS } from '@/src/shared/settings.ts';
 
 /** Longest wait for an idle period before loading detection anyway. */
 const IDLE_TIMEOUT_MS = 2000;
@@ -51,18 +60,35 @@ export default defineContentScript({
     // browser's language list.
     const languageRegions = regionsFromLanguages(navigator.languages);
     const yielder = createMainThreadYielder();
+    const settings = watchSettings(
+      browser.storage.local,
+      browser.storage.onChanged,
+    );
+    let current: PipelineSettings = DEFAULT_PIPELINE_SETTINGS;
+    const detectionConfig = (
+      from: PipelineSettings,
+      regions: readonly CountryCode[],
+    ): DetectionConfig => ({
+      homeRegions: effectiveHomeRegions(from, regions),
+      preferredRegions: regions,
+      entityTypes: from.entityTypes,
+      idPacks: from.idPacks,
+    });
     const detection = createLazyDetection({
-      load: importDetectionModule,
+      // The module is set up with the stored settings, so it waits for them.
+      load: async () => {
+        current = await settings.ready();
+        return importDetectionModule();
+      },
       create: (module) =>
         module.createDetection(
-          {
-            homeRegions: languageRegions,
-            preferredRegions: languageRegions,
-            entityTypes: LIVE_ENTITY_TYPES,
-            idPacks: DEFAULT_SETTINGS.idPacks,
-          },
+          detectionConfig(current, languageRegions),
           yielder,
         ),
+    });
+    settings.subscribe((next) => {
+      current = next;
+      detection.current()?.configure(detectionConfig(next, languageRegions));
     });
     // The service worker keeps the mappings; this tab holds the current
     // conversation's in memory while the page shows it.
@@ -74,7 +100,7 @@ export default defineContentScript({
       },
       randomUUID: () => crypto.randomUUID(),
     });
-    const masker = createMasker({
+    const pipeline = createPipeline({
       // A Send before the module is ready waits for it; if it cannot load,
       // the transform rejects and the Send is blocked.
       detect: async (text) => (await detection.ready()).analyse(text),
@@ -87,11 +113,34 @@ export default defineContentScript({
       // Any vault failure rejects, and the Send is blocked.
       mask: (items, issue) => session.mask(items, issue),
       isIssued: (value) => session.isIssued(value),
-      entityTypes: LIVE_ENTITY_TYPES,
+      entityTypes: () => current.entityTypes,
+      checkpoint: () => createCheckpoint(yielder, { signal: ctx.signal }),
+      clock: () => performance.now(),
+      report: ({ timings, masked, possible }) => {
+        devlog('pipeline.timing', { count: masked, timings });
+        // Not masked until the Review panel (P9); counted only.
+        if (possible > 0) devlog('pipeline.possible', { count: possible });
+      },
+    });
+    // Message requests sent with fetch: the net asks whether their text
+    // holds a value a send would have masked.
+    net.setVerifier(async (texts) => {
+      // Waits for the module like a send does; a load failure blocks.
+      const runtime = await detection.ready();
+      for (const text of texts) {
+        const detections = await runtime.analyse(text);
+        const unmasked = detections.some((found) =>
+          needsMasking(found, current.entityTypes, (value) =>
+            session.isIssued(value),
+          ),
+        );
+        if (unmasked) return true;
+      }
+      return false;
     });
     startInstance({
       adapter,
-      transform: masker.transform,
+      transform: pipeline.transform,
       source: session.source,
       session: vaultLifecycle(session, browser.runtime),
       net,
@@ -105,6 +154,7 @@ export default defineContentScript({
           detection.current()?.clear();
         },
         dispose: () => {
+          settings.dispose();
           detection.dispose();
           yielder.close();
         },

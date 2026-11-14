@@ -1,7 +1,10 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it } from 'vitest';
 import { senderSite } from '@/src/background/sites.ts';
-import { registerVaultHandlers } from '@/src/background/vault-host.ts';
+import {
+  createConversationQueue,
+  registerVaultHandlers,
+} from '@/src/background/vault-host.ts';
 import { STORE } from '@/src/core/vault/schema.ts';
 import {
   createVaultService,
@@ -314,7 +317,14 @@ describe('vault requests', () => {
       ok: true,
       value: {
         status: 'ok',
-        mappings: [{ standIn, real: DANA.value, type: 'EMAIL' }],
+        mappings: [
+          {
+            standIn,
+            real: DANA.value,
+            normalised: DANA.normalised,
+            type: 'EMAIL',
+          },
+        ],
         failed: 0,
       },
     });
@@ -414,5 +424,69 @@ describe('vault requests', () => {
         items: [DANA],
       }),
     ).toEqual({ ok: true, value: { status: 'error', code: 'unavailable' } });
+  });
+});
+
+describe('conversation queue', () => {
+  /** A promise the test settles by hand. */
+  function deferred() {
+    let resolve: () => void = () => undefined;
+    let reject: (error: Error) => void = () => undefined;
+    const promise = new Promise<void>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it('runs requests on one conversation in arrival order, others in parallel', async () => {
+    const inOrder = createConversationQueue();
+    const order: string[] = [];
+    const migrate = deferred();
+    const first = inOrder([PENDING, CONV], async () => {
+      await migrate.promise;
+      order.push('migrate');
+    });
+    const load = inOrder([CONV], () => {
+      order.push('load');
+      return Promise.resolve();
+    });
+    const other = inOrder(['chatgpt:another-conv'], () => {
+      order.push('other');
+      return Promise.resolve();
+    });
+    await other;
+    expect(order).toEqual(['other']);
+    migrate.resolve();
+    await Promise.all([first, load]);
+    expect(order).toEqual(['other', 'migrate', 'load']);
+  });
+
+  it('runs the next request after a failed one, and the failure reaches its caller', async () => {
+    const inOrder = createConversationQueue();
+    const failing = deferred();
+    const first = inOrder([CONV], () => failing.promise);
+    const next = inOrder([CONV], () => Promise.resolve('loaded'));
+    failing.reject(new Error('vault failed'));
+    await expect(first).rejects.toThrow('vault failed');
+    await expect(next).resolves.toBe('loaded');
+  });
+
+  it('a load after a pending chat moved sees the moved mappings', async () => {
+    const { ext, client } = setUp();
+    const tab = client(ext.openTab(URL_CONV));
+    await maskVia(tab, PENDING, [DANA]);
+    // Sent back to back, as a page that reloads right after the move does.
+    const [migrated, loaded] = await Promise.all([
+      tab.send('vault.migrate', { from: PENDING, to: CONV }),
+      tab.send('vault.load', { conversationId: CONV }),
+    ]);
+    expect(migrated).toEqual({
+      ok: true,
+      value: { status: 'migrated', count: 1 },
+    });
+    expect(
+      loaded.ok && loaded.value.status === 'ok' && loaded.value.mappings,
+    ).toHaveLength(1);
   });
 });

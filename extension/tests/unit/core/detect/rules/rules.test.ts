@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { COUNTRY_PACKS } from '@/src/core/detect/rules/packs/index.ts';
+import { detectRules } from '@/src/core/detect/rules/detector.ts';
+import { TEST_CARDS } from '@/src/core/detect/validators/reserved-values.ts';
 import { CARD_RULE } from '@/src/core/detect/rules/card.ts';
 import {
   containsWord,
@@ -100,14 +103,37 @@ describe('CARD_RULE', () => {
     expect(spans(CARD_RULE, '4242424242424242,5')).toEqual([]);
   });
 
-  it('confirms Luhn-valid branded numbers (Stripe test cards)', () => {
-    expect(CARD_RULE.validate('4242 4242 4242 4242', env())).toMatchObject({
+  it('confirms Luhn-valid branded numbers', () => {
+    // Braintree's published Visa test number.
+    expect(CARD_RULE.validate('4111 1111 1111 1111', env())).toMatchObject({
       valid: true,
       strength: 'checksum',
       possible: false,
     });
-    expect(CARD_RULE.validate('4242 4242 4242 4241', env(true))).toEqual({
+    expect(CARD_RULE.validate('4111 1111 1111 1112', env(true))).toEqual({
       valid: false,
+    });
+  });
+
+  it('marks the published test card numbers stand-ins use as reserved', async () => {
+    for (const number of Object.values(TEST_CARDS).flat()) {
+      expect(CARD_RULE.validate(number, env(true)), number).toMatchObject({
+        valid: true,
+        reserved: true,
+      });
+      // Reserved values are not reported, nor is another reading of them.
+      const found = await detectRules(`card ${number} and a 16 digit VID`, {
+        homeRegions: ['IN'],
+        entityTypes: new Set(['CARD', 'NATIONAL_ID', 'PHONE']),
+        packs: COUNTRY_PACKS,
+        exclude: [],
+      });
+      expect(found, number).toEqual([]);
+    }
+    // Only the exact numbers: the same prefix with other digits is a card.
+    expect(CARD_RULE.validate('4242 4242 4242 4226', env())).toMatchObject({
+      valid: true,
+      reserved: false,
     });
   });
 

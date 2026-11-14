@@ -48,12 +48,46 @@ function failure(error: unknown): VaultFailure {
     : { status: 'error', code: error.code };
 }
 
+/**
+ * Runs vault requests one at a time per conversation, in the order they
+ * arrive. A page reloaded right after a send or a pending chat's move must
+ * see what that request stored: its load arrives later, so it waits for the
+ * earlier request on the same conversation instead of reading the database
+ * halfway through it.
+ */
+export function createConversationQueue(): <T>(
+  conversationIds: readonly string[],
+  task: () => Promise<T>,
+) => Promise<T> {
+  const tails = new Map<string, Promise<void>>();
+  return (conversationIds, task) => {
+    const earlier = conversationIds.map(
+      (id) => tails.get(id) ?? Promise.resolve(),
+    );
+    const run = Promise.all(earlier).then(task);
+    // The next request waits for this one either way; its outcome belongs
+    // to the caller.
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    for (const id of conversationIds) tails.set(id, tail);
+    void tail.then(() => {
+      for (const id of conversationIds) {
+        if (tails.get(id) === tail) tails.delete(id);
+      }
+    });
+    return run;
+  };
+}
+
 /** Registers the vault handlers; returns their removal. */
 export function registerVaultHandlers({
   messenger,
   vault,
   tabs,
 }: VaultHostDeps): () => void {
+  const inOrder = createConversationQueue();
   const changed = (conversationId: string, sender: MessageSenderLike): void => {
     void notifyTabs(
       tabs,
@@ -67,12 +101,14 @@ export function registerVaultHandlers({
       const conversation = allowed(sender, request.conversationId);
       if (conversation === null) return FORBIDDEN;
       try {
-        const result = await vault.prepareMask({
-          conversationId: request.conversationId,
-          site: conversation.site,
-          status: conversation.kind === 'pending' ? 'pending' : 'active',
-          items: request.items,
-        });
+        const result = await inOrder([request.conversationId], () =>
+          vault.prepareMask({
+            conversationId: request.conversationId,
+            site: conversation.site,
+            status: conversation.kind === 'pending' ? 'pending' : 'active',
+            items: request.items,
+          }),
+        );
         return {
           status: 'ok',
           dateOffsetDays: result.dateOffsetDays,
@@ -95,13 +131,15 @@ export function registerVaultHandlers({
       const conversation = allowed(sender, request.conversationId);
       if (conversation === null) return FORBIDDEN;
       try {
-        const result = await vault.commitMask(
-          request.conversationId,
-          request.entries.map((entry) => ({
-            real: entry.item,
-            standIn: entry.standIn,
-            standInNormalised: entry.standInNormalised,
-          })),
+        const result = await inOrder([request.conversationId], () =>
+          vault.commitMask(
+            request.conversationId,
+            request.entries.map((entry) => ({
+              real: entry.item,
+              standIn: entry.standIn,
+              standInNormalised: entry.standInNormalised,
+            })),
+          ),
         );
         devlog('vault.masked', { count: result.inserted });
         // A pending chat belongs to this tab alone.
@@ -117,7 +155,9 @@ export function registerVaultHandlers({
     messenger.handle('vault.load', async (request, sender) => {
       if (allowed(sender, request.conversationId) === null) return FORBIDDEN;
       try {
-        const loaded = await vault.loadConversation(request.conversationId);
+        const loaded = await inOrder([request.conversationId], () =>
+          vault.loadConversation(request.conversationId),
+        );
         devlog('vault.loaded', { count: loaded.entries.length });
         if (loaded.failed > 0) {
           devlog('vault.load-failed', { count: loaded.failed });
@@ -127,6 +167,7 @@ export function registerVaultHandlers({
           mappings: loaded.entries.map((entry) => ({
             standIn: entry.surrogate,
             real: entry.real,
+            normalised: entry.normalised,
             type: entry.type,
           })),
           failed: loaded.failed,
@@ -148,7 +189,9 @@ export function registerVaultHandlers({
         return FORBIDDEN;
       }
       try {
-        const outcome = await vault.migrate(request.from, request.to);
+        const outcome = await inOrder([request.from, request.to], () =>
+          vault.migrate(request.from, request.to),
+        );
         if (outcome.status === 'nothing') return { status: 'nothing' };
         devlog('vault.migrated', { count: outcome.count });
         if (outcome.dropped > 0) {

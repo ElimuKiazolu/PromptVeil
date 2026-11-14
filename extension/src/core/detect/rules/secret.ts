@@ -25,6 +25,7 @@ import {
   isHighEntropyToken,
   validateSecret,
 } from '../validators/secret.ts';
+import { isDocumentedExampleKey } from '../validators/reserved-values.ts';
 import { INVALID, finding, type Rule, type Verdict } from './types.ts';
 
 const SECRET_CONTEXT = {
@@ -95,6 +96,8 @@ export function* findTokens(text: string): Generator<Span> {
 }
 
 function tokenVerdict(rule: Rule, value: string, hasContext: boolean): Verdict {
+  // Documented example credentials are no one's secret.
+  if (isDocumentedExampleKey(value)) return INVALID;
   const result = validateSecret(value);
   if (result.valid) {
     return finding(
@@ -199,6 +202,7 @@ export const SECRET_BEARER_RULE: Rule = {
   country: null,
   find: (text) => groupSpans(text, BEARER),
   validate(value) {
+    if (isDocumentedExampleKey(value)) return INVALID;
     // A JWT reads like member access (a.b.c), so known formats go first.
     if (validateSecret(value).valid)
       return finding(SECRET_BEARER_RULE, 'checksum');
@@ -410,11 +414,15 @@ const CODE: readonly RegExp[] = [
   /^[A-Za-z_$][\w$.]{0,127}\(.{0,256}\)$/u,
 ];
 
-/** True for placeholders such as "***", "<your key>" or "${API_KEY}". */
+/**
+ * True for placeholders such as "***", "<your key>" or "${API_KEY}", and
+ * for documented example credentials.
+ */
 export function isPlaceholder(value: string): boolean {
   const trimmed = value.trim();
   return (
     trimmed.length === 0 ||
+    isDocumentedExampleKey(trimmed) ||
     PLACEHOLDERS.some((pattern) => pattern.test(trimmed))
   );
 }

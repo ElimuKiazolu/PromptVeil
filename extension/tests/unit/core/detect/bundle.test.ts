@@ -9,7 +9,7 @@ const immediate: Yielder = { now: () => 0, yieldNow: () => Promise.resolve() };
 
 describe('detection module entry', () => {
   it('has the interface version the content script checks', () => {
-    expect(DETECTION_API_VERSION).toBe(3);
+    expect(DETECTION_API_VERSION).toBe(4);
   });
 
   it('detects with the configured types and packs, honouring idPacks', async () => {

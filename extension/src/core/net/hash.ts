@@ -2,7 +2,7 @@ import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 
-/** Kinds of real values the request safety net can recognise. */
+/** Kinds of value with a normal form of their own here (stand-in emails). */
 export type ValueKind = 'email';
 
 /** A 32-byte key as 64 lowercase hex characters. */
@@ -26,18 +26,18 @@ export function hmacSha256Hex(
   return bytesToHex(hmac(sha256, hexToBytes(keyHex), data));
 }
 
-export type ValueHasher = (kind: ValueKind, value: string) => string;
+/** Keyed hash of a compact form (see compact.ts). */
+export type FormHasher = (form: string) => string;
 
 /**
- * Keyed hash of a normalised value. Used so the page's world only ever holds
- * hashes of real values, never the values themselves.
+ * Keyed hash of a value's compact form. The page's world only ever holds
+ * these hashes of real values, never the values themselves.
  */
-export function createValueHasher(keyHex: string): ValueHasher {
+export function createFormHasher(keyHex: string): FormHasher {
   if (!HASH_KEY_PATTERN.test(keyHex)) {
     throw new RangeError('hash key must be 32 bytes of lowercase hex');
   }
-  return (kind, value) =>
-    hmacSha256Hex(keyHex, `${kind}\u0000${normaliseValue(kind, value)}`);
+  return (form) => hmacSha256Hex(keyHex, `form\u0000${form}`);
 }
 
 /** A fresh random key from the given random source. */

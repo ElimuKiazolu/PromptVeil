@@ -22,6 +22,7 @@ const readyNet: NetBridge = {
     callback();
   },
   sync: () => undefined,
+  setVerifier: () => undefined,
 };
 
 describe('startInstance', () => {
@@ -220,6 +221,7 @@ describe('startInstance', () => {
         else waiting.push(callback);
       },
       sync,
+      setVerifier: () => undefined,
     };
     const instance = start(undefined, pendingNet);
 
@@ -367,6 +369,7 @@ describe('startInstance with a vault session', () => {
       sync: (mappings) => {
         synced.push(mappings.map((mapping) => mapping.real));
       },
+      setVerifier: () => undefined,
     };
     const source = {
       version: 1,

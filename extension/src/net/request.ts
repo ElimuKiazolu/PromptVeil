@@ -45,6 +45,7 @@ export function requestTexts(
     request.url !== null &&
     rules.isMessageEndpoint(request.url, request.method);
   const message: string[] = [];
+  let parts: string[] | null = null;
 
   for (const text of request.body.texts) {
     all.push(text);
@@ -52,12 +53,17 @@ export function requestTexts(
     if (json !== undefined) all.push(...collectJsonStrings(json));
     if (isMessage) {
       // An unexpected body shape is checked in full rather than skipped.
-      const texts =
-        json === undefined
-          ? [text]
-          : (rules.messageTexts(json) ?? collectJsonStrings(json));
-      message.push(...texts);
+      const extracted = json === undefined ? null : rules.messageTexts(json);
+      if (extracted !== null) (parts ??= []).push(...extracted);
+      message.push(
+        ...(extracted ??
+          (json === undefined ? [text] : collectJsonStrings(json))),
+      );
     }
   }
-  return { all, message: isMessage ? message : null };
+  return {
+    all,
+    message: isMessage ? message : null,
+    messageParts: isMessage ? parts : null,
+  };
 }

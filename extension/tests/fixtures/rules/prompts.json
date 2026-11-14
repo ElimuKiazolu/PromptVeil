@@ -1,5 +1,5 @@
 {
-  "description": "Realistic prompts with every expected rule detection, in order. Values are specification examples and published test values only: RFC 2606 example domains, libphonenumber's example numbers (numbers in ranges reserved for fiction are not detected), Stripe test cards, SWIFT IBAN registry examples, AWS and Google documentation example keys. Secret tokens are written as {{NAME}} and built at test time so the repository holds no scanner-matching literals.",
+  "description": "Realistic prompts with every expected rule detection, in order. Values are specification examples and published test values only: RFC 2606 example domains, libphonenumber's example numbers (numbers in ranges reserved for fiction are not detected), processor test cards (Braintree's 4111 1111 1111 1111, Adyen's Amex 370000000000002; Stripe's test cards are not detected), SWIFT IBAN registry examples, AWS and Google documentation example keys. Secret tokens are written as {{NAME}} and built at test time so the repository holds no scanner-matching literals.",
   "prompts": [
     {
       "name": "resume",
@@ -89,7 +89,7 @@
     {
       "name": "text pasted from a PDF",
       "homeRegions": ["FR"],
-      "text": "Nom :\u00A0Alex Example\r\nIBAN\u00A0: FR14\u00A02004\u00A01010\u00A00505\u00A00001\u200B3M02\u00A0606\r\nCarte\u00A0: 4242\u200B4242\u200B4242\u200B4242\r\nE-mail\u00A0: alex.ex\u00ADample@example.com\r\nTél.\u00A0: 06\u00A012\u00A034\u00A056\u00A078\r\nPortable : ０６ １２ ３４ ５６ ７８",
+      "text": "Nom :\u00A0Alex Example\r\nIBAN\u00A0: FR14\u00A02004\u00A01010\u00A00505\u00A00001\u200B3M02\u00A0606\r\nCarte\u00A0: 4111\u200B1111\u200B1111\u200B1111\r\nE-mail\u00A0: alex.ex\u00ADample@example.com\r\nTél.\u00A0: 06\u00A012\u00A034\u00A056\u00A078\r\nPortable : ０６ １２ ３４ ５６ ７８",
       "expected": [
         {
           "type": "BANK",
@@ -99,7 +99,7 @@
         },
         {
           "type": "CARD",
-          "value": "4242\u200B4242\u200B4242\u200B4242",
+          "value": "4111\u200B1111\u200B1111\u200B1111",
           "status": "confirmed"
         },
         {
@@ -124,11 +124,11 @@
     {
       "name": "foreign national numbers (home region GB)",
       "homeRegions": ["GB"],
-      "text": "My colleague in Bengaluru: 81234 56789. Berlin office 030 123456. Amex 3782 822463 10005. Order 8123456789 shipped; the bare number 8123456789 is unclear.",
+      "text": "My colleague in Bengaluru: 81234 56789. Berlin office 030 123456. Amex 3700 000000 00002. Order 8123456789 shipped; the bare number 8123456789 is unclear.",
       "expected": [
         { "type": "PHONE", "value": "81234 56789", "status": "confirmed" },
         { "type": "PHONE", "value": "030 123456", "status": "confirmed" },
-        { "type": "CARD", "value": "3782 822463 10005", "status": "confirmed" },
+        { "type": "CARD", "value": "3700 000000 00002", "status": "confirmed" },
         { "type": "PHONE", "value": "8123456789", "status": "possible" }
       ]
     },

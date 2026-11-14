@@ -377,8 +377,10 @@ export async function detectRules(
   const resolved = groupReadings(candidates).map((group) =>
     resolveReadings(group, options.homeRegions),
   );
-  return selectNonOverlapping(resolved).map(
-    ({ primary, possible, alternatives }) => ({
+  // A published test value that wins its span hides the span entirely.
+  return selectNonOverlapping(resolved)
+    .filter(({ primary }) => !primary.finding.reserved)
+    .map(({ primary, possible, alternatives }) => ({
       type: primary.rule.type,
       subtype: primary.finding.subtype,
       country: primary.finding.country,
@@ -390,6 +392,5 @@ export async function detectRules(
       source: 'rule',
       status: possible ? 'possible' : 'confirmed',
       alternatives,
-    }),
-  );
+    }));
 }

@@ -33,6 +33,7 @@ export type DevEvent =
   | 'net.failed'
   | 'net.synced'
   | 'net.added'
+  | 'net.verified'
   | 'message.rejected'
   | 'message.failed'
   | 'prepass.failed'
@@ -55,7 +56,11 @@ export type DevEvent =
   | 'session.loaded'
   | 'session.failed'
   | 'session.migrated'
-  | 'session.dropped';
+  | 'session.dropped'
+  | 'pipeline.timing'
+  | 'pipeline.possible'
+  | 'settings.loaded'
+  | 'settings.failed';
 
 export type DevReason =
   | 'editor-missing'
@@ -90,6 +95,10 @@ const PREFIX = '[PromptVeil]';
 /** Distinguishes content-script instances (one per page load or injection). */
 const INSTANCE_TAG = Math.random().toString(36).slice(2, 6);
 
+/** Phases of a send whose time is logged (ms). */
+export type TimingPhase =
+  'rules' | 'prepare' | 'generate' | 'commit' | 'write' | 'total';
+
 export interface DevDetails {
   reason?: DevReason;
   /** Only the error's class name is printed. */
@@ -102,7 +111,24 @@ export interface DevDetails {
   transport?: 'fetch' | 'xhr' | 'websocket' | 'beacon';
   /** Vault failure code. */
   vault?: VaultFailureCode;
+  /** A duration in ms (e.g. a message request's verification). */
+  ms?: number;
+  /** Whether a verified message request was blocked. */
+  block?: boolean;
+  /** Durations of a send's phases, in ms. */
+  timings?: Readonly<Partial<Record<TimingPhase, number>>>;
 }
+
+const TIMING_PHASES: readonly TimingPhase[] = [
+  'rules',
+  'prepare',
+  'generate',
+  'commit',
+  'write',
+  'total',
+];
+
+const ms = (value: number): string => value.toFixed(1);
 
 export function devlog(event: DevEvent, details: DevDetails = {}): void {
   if (!import.meta.env.DEV) return;
@@ -119,6 +145,14 @@ export function devlog(event: DevEvent, details: DevDetails = {}): void {
     parts.push(`transport=${details.transport}`);
   }
   if (details.vault !== undefined) parts.push(`vault=${details.vault}`);
+  if (details.ms !== undefined) parts.push(`ms=${ms(details.ms)}`);
+  if (details.block !== undefined) parts.push(`block=${String(details.block)}`);
+  if (details.timings !== undefined) {
+    for (const phase of TIMING_PHASES) {
+      const value = details.timings[phase];
+      if (value !== undefined) parts.push(`${phase}=${ms(value)}`);
+    }
+  }
   // Info level is visible with DevTools' default console levels.
   console.info(parts.join(' '));
 }

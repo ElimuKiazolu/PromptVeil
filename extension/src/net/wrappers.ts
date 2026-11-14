@@ -14,11 +14,15 @@ export interface NetWindow {
   setTimeout: (handler: () => void, timeout?: number) => unknown;
 }
 
-/** Decides whether a request may go out; false blocks it. */
+/**
+ * Decides whether a request may go out; false blocks it. Only fetch may wait
+ * for an answer (a promise); the other transports must decide at once, and
+ * anything but `true` blocks them.
+ */
 export type AllowRequest = (
   request: DescribedRequest,
   transport: NetTransport,
-) => boolean;
+) => boolean | Promise<boolean>;
 
 /** The current value of a function property, captured before the page runs. */
 export function originalFunction<O extends object, K extends keyof O & string>(
@@ -118,7 +122,9 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
             init?.method ?? (input instanceof Request ? input.method : 'GET'),
           body: await readFetchBody(input, init),
         };
-        if (!allow(request, 'fetch')) throw new TypeError('Failed to fetch');
+        if (!(await allow(request, 'fetch'))) {
+          throw new TypeError('Failed to fetch');
+        }
         return Reflect.apply(impl, this ?? win, [
           input,
           init,
@@ -156,7 +162,7 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
           method: target?.method ?? 'GET',
           body: readBodySync(body),
         };
-        if (!allow(request, 'xhr')) {
+        if (allow(request, 'xhr') !== true) {
           // Report it the way a network failure would be reported.
           win.setTimeout(() => {
             this.dispatchEvent(new ProgressEventCtor('error'));
@@ -183,7 +189,7 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
         };
         // A blocked message is dropped; closing the socket could make the page
         // reconnect and resend it.
-        if (!allow(request, 'websocket')) return undefined;
+        if (allow(request, 'websocket') !== true) return undefined;
         return Reflect.apply(impl, this, [data]) as unknown;
       },
   );
@@ -199,7 +205,7 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
         method: 'POST',
         body: readBodySync(data),
       };
-      if (!allow(request, 'beacon')) return false;
+      if (allow(request, 'beacon') !== true) return false;
       return Reflect.apply(impl, this ?? win.navigator, [url, data]) === true;
     };
   const nativeBeacon = originalFunction(win.Navigator.prototype, 'sendBeacon');

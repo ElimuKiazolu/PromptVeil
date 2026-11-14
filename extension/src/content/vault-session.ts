@@ -21,12 +21,13 @@ import type {
   CommittedValue,
   IssueVault,
   PreparedValue,
-} from '@/src/core/masker.ts';
+} from '@/src/core/pipeline.ts';
 import type {
   BoundaryRule,
   StandInMapping,
   StandInSource,
 } from '@/src/core/restore/index.ts';
+import { netForms } from '@/src/core/net/forms.ts';
 import {
   activeConversationId,
   isSiteConversationId,
@@ -189,10 +190,20 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     for (const listener of listeners) listener();
   };
 
-  const add = (standIn: string, real: string, type: EntityType): boolean => {
+  const add = (
+    standIn: string,
+    real: string,
+    type: EntityType,
+    normalised: string,
+  ): boolean => {
     const key = standIn.toLowerCase();
     if (byStandIn.has(key)) return false;
-    byStandIn.set(key, { standIn, real, boundary: boundaryFor(type) });
+    byStandIn.set(key, {
+      standIn,
+      real,
+      boundary: boundaryFor(type),
+      netForms: netForms(type, real, normalised),
+    });
     return true;
   };
 
@@ -236,7 +247,11 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       }
       let added = 0;
       for (const mapping of reply.mappings) {
-        if (add(mapping.standIn, mapping.real, mapping.type)) added += 1;
+        if (
+          add(mapping.standIn, mapping.real, mapping.type, mapping.normalised)
+        ) {
+          added += 1;
+        }
       }
       failed = reply.failed;
       status = 'ready';
@@ -386,7 +401,10 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       let added = false;
       for (const [index, standIn] of standIns.entries()) {
         const item = items[index];
-        if (item !== undefined && add(standIn, item.value, item.type)) {
+        if (
+          item !== undefined &&
+          add(standIn, item.value, item.type, item.normalised)
+        ) {
           added = true;
         }
       }

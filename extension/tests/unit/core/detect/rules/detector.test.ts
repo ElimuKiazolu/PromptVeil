@@ -372,12 +372,13 @@ describe('overlap resolution order', () => {
 
 describe('overlaps between real rules', () => {
   it('a 15-digit Amex number is a card, not a phone number', async () => {
+    // Adyen's published Amex test card number.
     const detections = await detectRules(
-      'Amex 3782 822463 10005 ok',
+      'Amex 3700 000000 00002 ok',
       options(),
     );
     expect(detections.map((d) => [d.type, d.value])).toEqual([
-      ['CARD', '3782 822463 10005'],
+      ['CARD', '3700 000000 00002'],
     ]);
   });
 
@@ -447,7 +448,7 @@ describe('detectRules options', () => {
 
   it('maps spans back to the original text across normalisation', async () => {
     const text =
-      'Mail ｄａｎａ＠ｅｘａｍｐｌｅ．ｃｏｍ, card 4242\u00A04242\u00A04242\u00A04242';
+      'Mail ｄａｎａ＠ｅｘａｍｐｌｅ．ｃｏｍ, card 4111\u00A01111\u00A01111\u00A01111';
     const detections = await detectRules(text, options());
     for (const detection of detections) {
       expect(text.slice(detection.start, detection.end)).toBe(detection.value);

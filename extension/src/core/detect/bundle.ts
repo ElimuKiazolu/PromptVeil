@@ -24,7 +24,7 @@ import { generateStandIn } from '../surrogate/engine.ts';
 import type { StandIn, StandInRequest } from '../surrogate/types.ts';
 
 /** Changes whenever the module's exports change shape. */
-export const DETECTION_API_VERSION = 3;
+export const DETECTION_API_VERSION = 4;
 
 export interface DetectionConfig {
   readonly homeRegions: readonly CountryCode[];
@@ -46,6 +46,12 @@ export interface DetectionRuntime {
   dispose(): void;
   /** Builds lookup tables and compiles patterns, yielding at the checkpoint. */
   warmUp(checkpoint: Checkpoint): Promise<void>;
+  /**
+   * Applies new settings to later analyses. Cached results (made with the
+   * old settings) are dropped; an analysis already running finishes with the
+   * settings it started with.
+   */
+  configure(config: DetectionConfig): void;
   /** The vault normal form of a detected value (sent with it to the vault). */
   normalise(detection: Detection): string;
   /**
@@ -64,16 +70,18 @@ export function createDetection(
   config: DetectionConfig,
   yielder: Yielder,
 ): DetectionRuntime {
-  const analyzer = createDraftAnalyzer({
-    analyse: rulesAnalysis({
-      homeRegions: config.homeRegions,
-      preferredRegions: config.preferredRegions,
-      entityTypes: config.entityTypes,
-      packs: enabledPacks(COUNTRY_PACKS, config.idPacks),
-    }),
-    yielder,
-    onClear: clearRuleCaches,
-  });
+  const analyzerFor = (settings: DetectionConfig) =>
+    createDraftAnalyzer({
+      analyse: rulesAnalysis({
+        homeRegions: settings.homeRegions,
+        preferredRegions: settings.preferredRegions,
+        entityTypes: settings.entityTypes,
+        packs: enabledPacks(COUNTRY_PACKS, settings.idPacks),
+      }),
+      yielder,
+      onClear: clearRuleCaches,
+    });
+  let analyzer = analyzerFor(config);
   return {
     analyse: (text) => analyzer.analyse(text),
     prepare: (text) => analyzer.prepare(text),
@@ -92,5 +100,10 @@ export function createDetection(
         detection.value,
       ),
     standIn: generateStandIn,
+    configure: (next) => {
+      const previous = analyzer;
+      analyzer = analyzerFor(next);
+      previous.clear();
+    },
   };
 }

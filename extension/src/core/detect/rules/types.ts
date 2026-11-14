@@ -66,6 +66,13 @@ export interface Finding {
   readonly possible: boolean;
   /** Other readings the validator itself found (e.g. phone regions). */
   readonly alternatives: readonly DetectionAlternative[];
+  /**
+   * A published test value of this format (NHS test range, a test card
+   * number): it takes part in choosing between readings like any finding,
+   * but if it is chosen, nothing is reported for its span. It is no one's
+   * data, and other readings of the same text must not surface instead.
+   */
+  readonly reserved: boolean;
 }
 
 export type Verdict = { readonly valid: false } | Finding;
@@ -111,6 +118,7 @@ export function finding(
     possible?: boolean;
     country?: CountryCode | null;
     alternatives?: readonly DetectionAlternative[];
+    reserved?: boolean;
   } = {},
 ): Finding {
   return {
@@ -120,5 +128,6 @@ export function finding(
     country: options.country === undefined ? rule.country : options.country,
     possible: options.possible ?? false,
     alternatives: options.alternatives ?? [],
+    reserved: options.reserved ?? false,
   };
 }

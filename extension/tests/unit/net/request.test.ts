@@ -109,6 +109,45 @@ describe('requestTexts', () => {
       { url: null, method: 'POST', body: body('dana@example.com') },
       chatgptNetRules,
     );
-    expect(texts).toEqual({ all: ['dana@example.com'], message: null });
+    expect(texts).toEqual({
+      all: ['dana@example.com'],
+      message: null,
+      messageParts: null,
+    });
+  });
+});
+
+describe('message parts for the isolated check', () => {
+  it('are the adapter-extracted text fields of a message request', () => {
+    const texts = requestTexts(
+      {
+        url: MESSAGE_URL,
+        method: 'POST',
+        body: body(newMessageBody('hi there')),
+      },
+      chatgptNetRules,
+    );
+    // Every string of each message's content (see the adapter).
+    expect(texts.messageParts).toContain('hi there');
+    expect(texts.messageParts).not.toContain('Europe/London');
+  });
+
+  it('are null for an unexpected body shape and for other requests', () => {
+    expect(
+      requestTexts(
+        { url: MESSAGE_URL, method: 'POST', body: body('{"prompt":"x"}') },
+        chatgptNetRules,
+      ).messageParts,
+    ).toBeNull();
+    expect(
+      requestTexts(
+        {
+          url: new URL('https://chatgpt.com/backend-api/settings'),
+          method: 'POST',
+          body: body(newMessageBody('hi')),
+        },
+        chatgptNetRules,
+      ).messageParts,
+    ).toBeNull();
   });
 });

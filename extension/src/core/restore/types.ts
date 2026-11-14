@@ -11,6 +11,11 @@ export interface StandInMapping {
   readonly standIn: string;
   readonly real: string;
   readonly boundary: BoundaryRule;
+  /**
+   * Compact forms of the real value the request safety net looks for (see
+   * src/core/net/forms.ts); when absent, the compact form of `real`.
+   */
+  readonly netForms?: readonly string[];
 }
 
 /**
