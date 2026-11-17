@@ -159,6 +159,9 @@ export function registerVaultHandlers({
               real: entry.item,
               standIn: entry.standIn,
               standInNormalised: entry.standInNormalised,
+              variants: entry.variants,
+              locale: entry.locale,
+              parent: entry.parent,
             })),
             request.reused,
           ),
@@ -187,6 +190,9 @@ export function registerVaultHandlers({
         if (loaded.failed > 0) {
           devlog('vault.load-failed', { count: loaded.failed });
         }
+        const standInsById = new Map(
+          loaded.entries.map((entry) => [entry.mappingId, entry.surrogate]),
+        );
         return {
           status: 'ok',
           mappings: loaded.entries.map((entry) => ({
@@ -194,6 +200,12 @@ export function registerVaultHandlers({
             real: entry.real,
             normalised: entry.normalised,
             type: entry.type,
+            variants: [...entry.variants],
+            locale: entry.locale,
+            parent:
+              entry.parentId === null
+                ? null
+                : (standInsById.get(entry.parentId) ?? null),
           })),
           failed: loaded.failed,
         };

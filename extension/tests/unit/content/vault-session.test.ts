@@ -16,7 +16,7 @@ import {
   type VaultService,
 } from '@/src/core/vault/service.ts';
 import { createPipeline, issueStandIns } from '@/src/core/pipeline.ts';
-import { generateStandIn } from '@/src/core/surrogate/engine.ts';
+import { testEngine } from '../word-lists.ts';
 import {
   createMessenger,
   PROTOCOL,
@@ -138,7 +138,7 @@ function openSession(
 const maskIn = (session: VaultSession, items: MaskItem[]) =>
   session.mask(items, (vault) =>
     issueStandIns(items, vault, {
-      standIn: generateStandIn,
+      standIn: testEngine().standIn,
       fits: () => true,
       now: Date.now(),
     }),
@@ -160,11 +160,11 @@ describe('vault session', () => {
     const w = world();
     const a = openSession(w, CONV_URL);
     const [first] = await maskIn(a.session, [DANA]);
-    expect(first).toMatch(/^standin\.1\.[a-z0-9]{4}@example\.net$/);
-    expect(await maskIn(a.session, [ROBIN, DANA])).toEqual([
-      expect.stringMatching(/^standin\.2\./),
-      first,
-    ]);
+    expect(first).toMatch(/^[a-z]+\.[a-z]+@example\.(?:org|net)$/);
+    const [second, again] = await maskIn(a.session, [ROBIN, DANA]);
+    expect(second).toMatch(/@example\.(?:org|net)$/);
+    expect(second).not.toBe(first);
+    expect(again).toBe(first);
     const b = openSession(w, CONV_URL);
     expect(await maskIn(b.session, [DANA])).toEqual([first]);
     expect(a.session.isIssued(first ?? '')).toBe(true);
@@ -485,13 +485,14 @@ describe('looking values up while the user types', () => {
   it('a Send after a peek needs only the commit', async () => {
     const w = world();
     const s = openSession(w, CONV_URL);
-    await maskIn(s.session, [DANA]);
+    const [stored] = await maskIn(s.session, [DANA]);
     await s.session.peek([DANA, ROBIN]);
     const from = s.requests.length;
     const [dana, robin] = await maskIn(s.session, [DANA, ROBIN]);
     expect(since(s.requests, from)).toEqual(['vault.commit']);
-    expect(dana).toMatch(/^standin\.1\./u);
-    expect(robin).toMatch(/^standin\.2\./u);
+    expect(dana).toBe(stored);
+    expect(robin).toMatch(/@example\.(?:org|net)$/u);
+    expect(robin).not.toBe(stored);
     // Peeking values already looked up asks for nothing.
     const again = s.requests.length;
     await s.session.peek([DANA, ROBIN]);
@@ -581,7 +582,8 @@ describe('looking values up while the user types', () => {
       'vault.prepare',
       'vault.commit',
     ]);
-    expect(second).not.toBe(first);
+    // Stored again: the same seed gives the same stand-in (TR-S1).
+    expect(second).toBe(first);
   });
 
   it('a failed peek leaves the next Send working', async () => {
@@ -619,7 +621,7 @@ describe('vault session in the page', () => {
     const masker = createPipeline({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value.toLowerCase(),
-      engine: () => Promise.resolve(generateStandIn),
+      engine: () => Promise.resolve(testEngine()),
       mask: (items, issue) => s.session.mask(items, issue),
       isIssued: (value) => s.session.isIssued(value),
       entityTypes: () => new Set(['EMAIL']),
@@ -646,7 +648,7 @@ describe('vault session in the page', () => {
       expect(h.siteSends).toHaveLength(1);
     });
     expect(h.siteSends[0]).toMatch(
-      /^Mail standin\.1\.[a-z0-9]{4}@example\.net$/,
+      /^Mail [a-z]+\.[a-z]+@example\.(?:org|net)$/,
     );
     controller.abort();
   });

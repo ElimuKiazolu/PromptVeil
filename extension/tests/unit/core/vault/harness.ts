@@ -20,6 +20,7 @@ import {
 import { MIGRATIONS, type Migration } from '@/src/core/vault/schema.ts';
 import type { VaultService } from '@/src/core/vault/service.ts';
 import { generateStandIn, StandInError } from '@/src/core/surrogate/engine.ts';
+import { testEnv } from '../../word-lists.ts';
 
 export const webCrypto: Crypto = globalThis.crypto;
 
@@ -245,6 +246,7 @@ export const engineGenerator: TestGenerator = (real, prepared, attempt) => {
       },
       prepared.seed,
       attempt,
+      testEnv(),
     );
   } catch (error) {
     if (!(error instanceof StandInError)) throw error;

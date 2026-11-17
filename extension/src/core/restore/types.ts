@@ -3,8 +3,11 @@
  * - 'email': not glued to further local-part or domain characters, so
  *   "xstandin.1@example.net.au" does not contain "standin.1@example.net".
  * - 'word': not glued to further letters, digits or underscores.
+ * - 'name': like 'word', and written exactly as the stand-in (or in
+ *   capitals): a single part of a person's name ("Hughes"), which in other
+ *   case ("will", "rose") is usually an ordinary word.
  */
-export type BoundaryRule = 'email' | 'word';
+export type BoundaryRule = 'email' | 'word' | 'name';
 
 /** One stand-in shown to the chatbot and the real value it replaced. */
 export interface StandInMapping {

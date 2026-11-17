@@ -19,12 +19,22 @@ import {
   warmUpRules,
 } from './rules/analysis.ts';
 import { COUNTRY_PACKS, enabledPacks } from './rules/packs/index.ts';
-import type { Checkpoint, Yielder } from './schedule.ts';
-import { generateStandIn } from '../surrogate/engine.ts';
-import type { StandIn, StandInRequest } from '../surrogate/types.ts';
+import { createCheckpoint, type Checkpoint, type Yielder } from './schedule.ts';
+import {
+  generateStandIn,
+  WORD_TYPES,
+  wordListFor,
+} from '../surrogate/engine.ts';
+import type {
+  StandIn,
+  StandInEnvironment,
+  StandInRequest,
+} from '../surrogate/types.ts';
+import { localeForRegion, type LocaleId } from '../surrogate/words/locales.ts';
+import { createWordStore, type WordLoader } from '../surrogate/words/store.ts';
 
 /** Changes whenever the module's exports change shape. */
-export const DETECTION_API_VERSION = 4;
+export const DETECTION_API_VERSION = 5;
 
 export interface DetectionConfig {
   readonly homeRegions: readonly CountryCode[];
@@ -32,7 +42,15 @@ export interface DetectionConfig {
   readonly entityTypes: ReadonlySet<EntityType>;
   /** Country pack switches from settings; a missing country counts as on. */
   readonly idPacks: Readonly<Partial<Record<CountryCode, boolean>>>;
+  /** ADDRESS stand-ins keep the city (settings.keepCity). */
+  readonly keepCity: boolean;
 }
+
+/** The parts of a stand-in request that decide its word lists. */
+export type WordListRequest = Pick<
+  StandInRequest,
+  'type' | 'value' | 'country' | 'links'
+>;
 
 /** Draft analysis with the rules, plus warm-up and cache control. */
 export interface DetectionRuntime {
@@ -55,9 +73,14 @@ export interface DetectionRuntime {
   /** The vault normal form of a detected value (sent with it to the vault). */
   normalise(detection: Detection): string;
   /**
+   * Loads the word lists stand-ins for these requests draw from (PERSON,
+   * ORG, ADDRESS, EMAIL); rejects when a file cannot be loaded.
+   */
+  loadWords(requests: readonly WordListRequest[]): Promise<void>;
+  /**
    * The stand-in engine: the stand-in for a value, its seed (from the
    * vault) and an attempt number; null when this attempt has none. Throws
-   * for a type without a generator.
+   * for a type without a generator, or when its word lists are not loaded.
    */
   standIn(
     request: StandInRequest,
@@ -66,10 +89,37 @@ export interface DetectionRuntime {
   ): StandIn | null;
 }
 
+/** Locales of the home regions, then of the other preferred regions. */
+function preferredLocales(config: DetectionConfig): LocaleId[] {
+  const out = new Set<LocaleId>();
+  for (const region of [...config.homeRegions, ...config.preferredRegions]) {
+    const locale = localeForRegion(region);
+    if (locale !== undefined) out.add(locale.id);
+  }
+  return [...out];
+}
+
+function noWordLists(): Promise<never> {
+  return Promise.reject(new Error('no word loader'));
+}
+
+/**
+ * `loadWord` reads a bundled word-list file (the content script fetches it
+ * from the extension package); without one, stand-ins needing word lists
+ * cannot be made.
+ */
 export function createDetection(
   config: DetectionConfig,
   yielder: Yielder,
+  loadWord: WordLoader = noWordLists,
 ): DetectionRuntime {
+  const words = createWordStore(loadWord, () => createCheckpoint(yielder));
+  let current = config;
+  const env = (): StandInEnvironment => ({
+    words,
+    preferredLocales: preferredLocales(current),
+    keepCity: current.keepCity,
+  });
   const analyzerFor = (settings: DetectionConfig) =>
     createDraftAnalyzer({
       analyse: rulesAnalysis({
@@ -99,8 +149,21 @@ export function createDetection(
         detection.country,
         detection.value,
       ),
-    standIn: generateStandIn,
+    loadWords: async (requests) => {
+      const needed = requests.filter((request) => WORD_TYPES.has(request.type));
+      if (needed.length === 0) return;
+      await words.loadIndex();
+      const environment = env();
+      const locales = needed.flatMap((request) => {
+        const locale = wordListFor(request, environment);
+        return locale === null ? [] : [locale];
+      });
+      await words.loadLocales(locales);
+    },
+    standIn: (request, seed, attempt) =>
+      generateStandIn(request, seed, attempt, env()),
     configure: (next) => {
+      current = next;
       const previous = analyzer;
       analyzer = analyzerFor(next);
       previous.clear();

@@ -337,6 +337,7 @@ describe('loadConversation', () => {
       country: null,
       surrogate: 'standin.one@example.net',
       variants: ['standin.one'],
+      locale: null,
       parentId: null,
       real: EMAIL.value,
       normalised: EMAIL.normalised,

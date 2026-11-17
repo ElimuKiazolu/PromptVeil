@@ -326,6 +326,7 @@ export interface RestoreEntry {
   country: CountryCode | null;
   surrogate: string;
   variants: readonly string[];
+  locale: string | null;
   parentId: string | null;
   real: string;
   /** The real value's normal form (stored with it, encrypted). */
@@ -386,6 +387,7 @@ export async function loadConversation(
       country: record.country,
       surrogate: record.surrogate,
       variants: record.variants,
+      locale: record.locale,
       parentId: record.parentId,
       real,
       normalised,

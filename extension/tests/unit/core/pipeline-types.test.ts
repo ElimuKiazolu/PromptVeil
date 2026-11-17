@@ -24,7 +24,7 @@ import {
   type PipelineOptions,
   type PipelineReport,
 } from '@/src/core/pipeline.ts';
-import { generateStandIn } from '@/src/core/surrogate/engine.ts';
+import { testEngine } from '../word-lists.ts';
 import type { Detection, EntityType } from '@/src/shared/entities.ts';
 
 /** One seed per value; stand-ins stored on commit. */
@@ -78,7 +78,7 @@ function pipeline(options: Partial<PipelineOptions> = {}) {
   const created = createPipeline({
     detect: detectAll,
     normalise: (d) => normaliseReal(d.type, d.subtype, d.country, d.value),
-    engine: () => Promise.resolve(generateStandIn),
+    engine: () => Promise.resolve(testEngine()),
     mask: (_items, issue) => issue(vault),
     isIssued: (value) => used.has(value),
     entityTypes: () => MASKABLE_TYPES,
@@ -233,7 +233,7 @@ describe('one commit per send', () => {
       },
     };
     const standIns = await issueStandIns([item], vault, {
-      standIn: generateStandIn,
+      standIn: testEngine().standIn,
       fits: () => true,
       now: 0,
     });
@@ -248,7 +248,7 @@ describe('one commit per send', () => {
     };
     await expect(
       issueStandIns([item], vault, {
-        standIn: generateStandIn,
+        standIn: testEngine().standIn,
         fits: () => true,
         now: 0,
       }),

@@ -14,18 +14,12 @@ import { normaliseEmail } from './validators/email.ts';
 import { normaliseIban } from './validators/iban.ts';
 import { normalisePhone } from './validators/phone.ts';
 import { normaliseSecret } from './validators/secret.ts';
+import { TITLES } from '../names/titles.ts';
 
 /** Upper case without spaces, hyphens, dots and slashes. */
 function compactUpper(value: string): string {
   return value.toUpperCase().replace(/[\s./-]/gu, '');
 }
-
-/**
- * Leading titles in several languages, matched after lower-casing. "m." only
- * with its dot, so a bare initial M is kept.
- */
-const TITLES =
-  /^(?:(?:mr|mrs|ms|miss|mx|dr|dra|prof|shri|smt|sri|sr|sra|srta|herr|frau|mme|mlle|m\.)\.?\s+)+/u;
 
 /** NFC, spaces collapsed, lower case, leading titles removed. */
 function normaliseName(value: string): string {

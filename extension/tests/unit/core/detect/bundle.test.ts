@@ -4,12 +4,14 @@ import {
   createDetection,
 } from '@/src/core/detect/bundle.ts';
 import { createCheckpoint, type Yielder } from '@/src/core/detect/schedule.ts';
+import { WordListError } from '@/src/core/surrogate/words/format.ts';
+import { diskWordLoader } from '../../word-lists.ts';
 
 const immediate: Yielder = { now: () => 0, yieldNow: () => Promise.resolve() };
 
 describe('detection module entry', () => {
   it('has the interface version the content script checks', () => {
-    expect(DETECTION_API_VERSION).toBe(4);
+    expect(DETECTION_API_VERSION).toBe(5);
   });
 
   it('detects with the configured types and packs, honouring idPacks', async () => {
@@ -19,6 +21,7 @@ describe('detection module entry', () => {
         preferredRegions: [],
         entityTypes: new Set(['EMAIL', 'NATIONAL_ID']),
         idPacks: { BR: false },
+        keepCity: true,
       },
       immediate,
     );
@@ -44,6 +47,7 @@ describe('detection module entry', () => {
         preferredRegions: [],
         entityTypes: new Set(['EMAIL', 'PHONE']),
         idPacks: {},
+        keepCity: true,
       },
       immediate,
     );
@@ -64,6 +68,7 @@ describe('detection module entry', () => {
         preferredRegions: [],
         entityTypes: new Set(['PHONE']),
         idPacks: {},
+        keepCity: true,
       },
       immediate,
     );
@@ -83,15 +88,17 @@ describe('detection module entry', () => {
 });
 
 describe('stand-in engine in the detection module', () => {
-  it('gives deterministic stand-ins for a seed and attempt', () => {
+  it('gives deterministic stand-ins for a seed and attempt', async () => {
     const runtime = createDetection(
       {
         homeRegions: [],
         preferredRegions: [],
         entityTypes: new Set(['EMAIL']),
         idPacks: {},
+        keepCity: true,
       },
       immediate,
+      diskWordLoader,
     );
     const request = {
       type: 'EMAIL' as const,
@@ -104,9 +111,12 @@ describe('stand-in engine in the detection module', () => {
       now: 0,
     };
     const seed = new Uint8Array(32).fill(7);
+    // Word lists first: generation itself is synchronous.
+    expect(() => runtime.standIn(request, seed, 0)).toThrow(WordListError);
+    await runtime.loadWords([request]);
     const first = runtime.standIn(request, seed, 0);
-    expect(first?.value).toMatch(/^standin\.4\.[a-z0-9]{4}@example\.net$/u);
+    expect(first?.value).toMatch(/^[a-z]+\.[a-z]+@example\.(?:com|org|net)$/u);
     expect(runtime.standIn(request, seed, 0)).toEqual(first);
-    expect(runtime.standIn(request, seed, 1)?.value).toMatch(/^standin\.5\./u);
+    expect(runtime.standIn(request, seed, 1)?.value).not.toBe(first?.value);
   });
 });

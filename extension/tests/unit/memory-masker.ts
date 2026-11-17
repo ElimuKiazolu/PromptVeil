@@ -11,6 +11,7 @@ import {
 } from '@/src/core/pipeline.ts';
 import type { Detection } from '@/src/shared/entities.ts';
 import type { MaskItem } from '@/src/shared/vault-protocol.ts';
+import { asEngine } from './word-lists.ts';
 
 export interface MemoryMasker {
   transform: (text: string) => Promise<string>;
@@ -22,7 +23,7 @@ export interface MemoryMasker {
 /** `standin.N@example.net`, N the mapping number plus the attempt. */
 export const numberedStandIns: StandInFactory = (request, _seed, attempt) => {
   const value = `standin.${(request.number + attempt).toString()}@example.net`;
-  return { value, normalised: value, reserved: true };
+  return { value, normalised: value, reserved: true, locale: null, parts: [] };
 };
 
 /**
@@ -85,7 +86,7 @@ export function createMemoryMasker(options: {
   const masker = createPipeline({
     detect: options.detect,
     normalise: (detection) => detection.value.toLowerCase(),
-    engine: () => Promise.resolve(numberedStandIns),
+    engine: () => Promise.resolve(asEngine(numberedStandIns)),
     mask: (_items, issue) => issue(vault),
     isIssued: (value) => usedStandIns.has(value.toLowerCase()),
     entityTypes: () => new Set(['EMAIL']),

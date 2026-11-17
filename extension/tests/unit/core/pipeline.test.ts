@@ -12,6 +12,7 @@ import {
 } from '@/src/core/pipeline.ts';
 import type { MaskItem } from '@/src/shared/vault-protocol.ts';
 import { createMemoryMasker, numberedStandIns } from '../memory-masker.ts';
+import { asEngine } from '../word-lists.ts';
 import { detectEmailsOnly } from '../spike-detect.ts';
 import { detectEmails } from '@/src/core/detect/rules/email.ts';
 
@@ -191,7 +192,7 @@ describe('createPipeline', () => {
     const { transform } = createPipeline({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value,
-      engine: () => Promise.resolve(numberedStandIns),
+      engine: () => Promise.resolve(asEngine(numberedStandIns)),
       mask: () => Promise.reject(new Error('vault failed')),
       isIssued: () => false,
       entityTypes: () => new Set(['EMAIL']),
@@ -217,7 +218,7 @@ describe('createPipeline', () => {
     const { transform } = createPipeline({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value,
-      engine: () => Promise.resolve(numberedStandIns),
+      engine: () => Promise.resolve(asEngine(numberedStandIns)),
       mask,
       isIssued: () => false,
       entityTypes: () => new Set(['EMAIL']),
@@ -306,7 +307,13 @@ describe('issueStandIns', () => {
     // Both values' first choice is the same text.
     const same: StandInFactory = (_request, _seed, attempt) => {
       const value = `standin.${attempt.toString()}@example.net`;
-      return { value, normalised: value, reserved: true };
+      return {
+        value,
+        normalised: value,
+        reserved: true,
+        locale: null,
+        parts: [],
+      };
     };
     const vault = scriptedVault(() => 'inserted');
     expect(
@@ -390,6 +397,8 @@ describe('prompt checks (TR-S3)', () => {
     value,
     normalised: value,
     reserved: true,
+    locale: null,
+    parts: [],
   });
 
   it('refuses a stand-in that appears elsewhere in the prompt', () => {

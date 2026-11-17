@@ -30,6 +30,10 @@ export const MAX_MASK_ITEMS = 200;
 /** Longest value (and normal form) a request may carry. */
 export const MAX_VALUE_LENGTH = 4096;
 
+/** Most variants per mapping, and the longest locale id. */
+export const MAX_VARIANTS = 16;
+const LOCALE_ID = /^[a-z]{2}(?:_[A-Z]{2})?$/u;
+
 /** Longest conversation ID accepted in a message. */
 const MAX_CONVERSATION_ID_LENGTH = 256;
 
@@ -79,6 +83,12 @@ export interface CommitEntry {
   standIn: string;
   /** The stand-in's normal form under the real value's rules. */
   standInNormalised: string;
+  /** Stand-in-side forms stored with it (a PERSON stand-in's name parts). */
+  variants: string[];
+  /** The word-list locale the stand-in came from. */
+  locale: string | null;
+  /** The stand-in of the mapping this one belongs to (an email's person). */
+  parent: string | null;
 }
 
 export interface CommitRequest {
@@ -112,6 +122,11 @@ export interface LoadedMapping {
   /** The real value's normal form (the request safety net needs it). */
   normalised: string;
   type: EntityType;
+  /** Stand-in-side forms (a PERSON stand-in's name parts). */
+  variants: string[];
+  locale: string | null;
+  /** The stand-in of the mapping this one belongs to. */
+  parent: string | null;
 }
 
 export type LoadResponse =
@@ -258,12 +273,31 @@ function isPeekResponse(value: unknown): value is PeekResponse {
   return isFailure(value);
 }
 
+function isVariants(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= MAX_VARIANTS &&
+    value.every((variant) => isBoundedString(variant, MAX_VALUE_LENGTH))
+  );
+}
+
+function isLocale(value: unknown): value is string | null {
+  return value === null || (typeof value === 'string' && LOCALE_ID.test(value));
+}
+
+function isParent(value: unknown): value is string | null {
+  return value === null || isBoundedString(value, MAX_VALUE_LENGTH);
+}
+
 function isCommitEntry(value: unknown): value is CommitEntry {
   return (
     isObject(value) &&
     isMaskItem(value.item) &&
     isBoundedString(value.standIn, MAX_VALUE_LENGTH) &&
-    isBoundedString(value.standInNormalised, MAX_VALUE_LENGTH)
+    isBoundedString(value.standInNormalised, MAX_VALUE_LENGTH) &&
+    isVariants(value.variants) &&
+    isLocale(value.locale) &&
+    isParent(value.parent)
   );
 }
 
@@ -316,7 +350,10 @@ function isLoadedMapping(value: unknown): value is LoadedMapping {
     isBoundedString(value.standIn, MAX_VALUE_LENGTH) &&
     typeof value.real === 'string' &&
     typeof value.normalised === 'string' &&
-    isEntityType(value.type)
+    isEntityType(value.type) &&
+    isVariants(value.variants) &&
+    isLocale(value.locale) &&
+    isParent(value.parent)
   );
 }
 

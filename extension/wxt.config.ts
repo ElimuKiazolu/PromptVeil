@@ -95,12 +95,12 @@ export default defineConfig({
       'https://gemini.google.com/*',
       'https://claude.ai/*',
     ],
-    // Only the content script on chatgpt.com imports it, through a URL that
-    // changes per browser session, so pages cannot use it to detect the
-    // extension.
+    // Only the content script on chatgpt.com reads them (the detection
+    // module and the stand-in word lists), through URLs that change per
+    // browser session, so pages cannot use them to detect the extension.
     web_accessible_resources: [
       {
-        resources: [DETECTION_MODULE],
+        resources: [DETECTION_MODULE, 'data/*.json'],
         matches: ['https://chatgpt.com/*'],
         use_dynamic_url: true,
       },

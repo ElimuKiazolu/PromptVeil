@@ -25,7 +25,8 @@
     "bench:build": "wxt build --mode bench",
     "bench:build:nocoi": "wxt build --mode bench-nocoi",
     "bench:rules": "node scripts/bench-rules.ts",
-    "generate:phone-shares": "node scripts/generate-phone-shares.ts && prettier --write src/core/detect/validators/phone-shares.generated.ts"
+    "generate:phone-shares": "node scripts/generate-phone-shares.ts && prettier --write src/core/detect/validators/phone-shares.generated.ts",
+    "generate:wordlists": "node scripts/build-wordlists.ts"
   },
   "dependencies": {
     "@fontsource/instrument-sans": "5.3.0",
@@ -39,6 +40,7 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@faker-js/faker": "10.6.0",
     "@resvg/resvg-js": "2.6.2",
     "@types/node": "24.19.2",
     "@types/react": "19.3.0",

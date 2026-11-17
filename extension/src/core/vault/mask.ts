@@ -176,6 +176,12 @@ export interface CommitEntry {
   standIn: string;
   /** Its normal form under the real value's rules. */
   standInNormalised: string;
+  /** Stand-in-side forms (a PERSON stand-in's name parts). */
+  variants?: readonly string[];
+  /** The word-list locale the stand-in came from. */
+  locale?: string | null;
+  /** The stand-in of the mapping this one belongs to (an email's person). */
+  parent?: string | null;
 }
 
 export type CommittedValue =
@@ -213,6 +219,11 @@ export async function commitMask(
   reused: readonly RealValue[] = [],
 ): Promise<CommitResult> {
   const now = context.now();
+  const parents = entries.map((entry) =>
+    entry.parent === undefined || entry.parent === null
+      ? null
+      : normaliseStandIn(entry.parent),
+  );
   const prepared: PreparedEntry[] = await Promise.all(
     entries.map(async (entry) => {
       const { real } = entry;
@@ -241,12 +252,12 @@ export async function commitMask(
         type: real.type,
         subtype: real.subtype,
         country: real.country,
-        locale: null,
+        locale: entry.locale ?? null,
         realHash,
         realEnc,
         surrogate: entry.standIn,
         surrogateNorm: normaliseStandIn(entry.standIn),
-        variants: [],
+        variants: [...(entry.variants ?? [])],
         parentId: null,
         source: 'rule',
         confidence: 1,
@@ -289,7 +300,7 @@ export async function commitMask(
 
       const values: CommittedValue[] = [];
       let inserted = 0;
-      for (const { mapping, standInHash } of prepared) {
+      for (const [position, { mapping, standInHash }] of prepared.entries()) {
         // Stored meanwhile (another tab, or earlier in this request).
         const existing = await reuse(mapping.realHash);
         if (existing !== null) {
@@ -306,7 +317,18 @@ export async function commitMask(
           values.push({ kind: 'taken' });
           continue;
         }
-        await requestResult(mappings.add(mapping));
+        // The parent is stored by now (persons are issued before their
+        // emails); a parent deleted meanwhile leaves no link.
+        const parent = parents[position] ?? null;
+        const parentRecord =
+          parent === null
+            ? null
+            : mappingOf(
+                await requestResult(bySurrogate.get([conversationId, parent])),
+              );
+        await requestResult(
+          mappings.add({ ...mapping, parentId: parentRecord?.id ?? null }),
+        );
         inserted += 1;
         values.push({ kind: 'inserted', standIn: mapping.surrogate });
       }

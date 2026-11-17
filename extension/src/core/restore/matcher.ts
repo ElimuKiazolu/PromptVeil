@@ -23,7 +23,7 @@ function isDelimited(
 ): boolean {
   const before = text.charAt(start - 1);
   const after = text.charAt(end);
-  if (rule === 'word') {
+  if (rule === 'word' || rule === 'name') {
     return !WORD_CHAR.test(before) && !WORD_CHAR.test(after);
   }
   if (EMAIL_BEFORE.test(before) || EMAIL_AFTER.test(after)) return false;
@@ -31,13 +31,22 @@ function isDelimited(
   return !(after === '.' && ALNUM.test(text.charAt(end + 1)));
 }
 
-/** An address shown in capitals comes back in capitals. */
+const isCapitals = (text: string): boolean =>
+  text === text.toUpperCase() && text !== text.toLowerCase();
+
+/** A name part counts only as written or in capitals. */
+function caseFits(shown: string, mapping: StandInMapping): boolean {
+  return (
+    mapping.boundary !== 'name' ||
+    shown === mapping.standIn ||
+    (isCapitals(shown) && shown === mapping.standIn.toUpperCase())
+  );
+}
+
+/** An address or a name part shown in capitals comes back in capitals. */
 function realAsShown(shown: string, mapping: StandInMapping): string {
-  if (mapping.boundary !== 'email') return mapping.real;
-  const upper = shown.toUpperCase();
-  return shown === upper && shown !== shown.toLowerCase()
-    ? mapping.real.toUpperCase()
-    : mapping.real;
+  if (mapping.boundary === 'word') return mapping.real;
+  return isCapitals(shown) ? mapping.real.toUpperCase() : mapping.real;
 }
 
 const EMPTY_MATCHER: RestoreMatcher = {
@@ -75,7 +84,8 @@ function createExactMatcher(
     const first = byKey.get(found.toLowerCase());
     if (
       first &&
-      isDelimited(text, index, index + found.length, first.boundary)
+      isDelimited(text, index, index + found.length, first.boundary) &&
+      caseFits(found, first)
     ) {
       return first;
     }
@@ -86,7 +96,8 @@ function createExactMatcher(
       const slice = text.slice(index, index + length);
       if (
         slice.toLowerCase() === mapping.standIn.toLowerCase() &&
-        isDelimited(text, index, index + length, mapping.boundary)
+        isDelimited(text, index, index + length, mapping.boundary) &&
+        caseFits(slice, mapping)
       ) {
         return mapping;
       }
@@ -148,8 +159,13 @@ export function createRestoreMatcher(
 ): RestoreMatcher {
   const all = [...mappings].filter((mapping) => mapping.standIn !== '');
   const exact = createExactMatcher(all);
+  // Name parts are often ordinary words too; the whole names they come
+  // from are counted.
   const plain = createExactMatcher(
-    all.filter((mapping) => mapping.variants === undefined),
+    all.filter(
+      (mapping) =>
+        mapping.variants === undefined && mapping.boundary !== 'name',
+    ),
   );
   const variants = createVariantFinder(all);
   if (all.length === 0) return EMPTY_MATCHER;

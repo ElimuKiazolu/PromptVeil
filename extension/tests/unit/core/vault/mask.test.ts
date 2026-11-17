@@ -1,7 +1,6 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { describe, expect, it } from 'vitest';
 import { normaliseReal } from '@/src/core/detect/normal-form.ts';
-import { isSpikeStandIn } from '@/src/core/spike-standin.ts';
 import {
   commitMask,
   peekMask,
@@ -324,19 +323,17 @@ describe('commitMask', () => {
 });
 
 describe('masking through both steps', () => {
-  it('issues engine stand-ins: spike format numbered from the stored count', async () => {
+  it('issues engine stand-ins: name-based addresses at reserved domains', async () => {
     const context = await readyContext();
     const result = await maskValues(context, request([DANA, ROBIN], PENDING));
     expect(result.inserted).toBe(2);
     for (const standIn of result.standIns) {
-      expect(isSpikeStandIn(standIn)).toBe(true);
+      // In the case style of the real address ("Dana.Whitfield").
+      expect(standIn).toMatch(
+        /^[A-Za-z][a-z]+\.[A-Za-z][a-z]+@example\.(?:com|org|net)$/u,
+      );
     }
-    expect(result.standIns[0]).toMatch(
-      /^standin\.1\.[a-z0-9]{4}@example\.net$/,
-    );
-    expect(result.standIns[1]).toMatch(
-      /^standin\.2\.[a-z0-9]{4}@example\.net$/,
-    );
+    expect(result.standIns[0]).not.toBe(result.standIns[1]);
   });
 
   it('stores a value repeated within one request once', async () => {

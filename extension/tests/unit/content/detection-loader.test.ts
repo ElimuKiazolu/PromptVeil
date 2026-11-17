@@ -19,6 +19,7 @@ function fakeRuntime(): DetectionRuntime {
     dispose: vi.fn(),
     warmUp: () => Promise.resolve(),
     normalise: (detection) => detection.value.toLowerCase(),
+    loadWords: () => Promise.resolve(),
     standIn: () => null,
     configure: vi.fn(),
   };
@@ -26,7 +27,7 @@ function fakeRuntime(): DetectionRuntime {
 
 function fakeModule(runtime: DetectionRuntime): DetectionModuleApi {
   return {
-    DETECTION_API_VERSION: 4,
+    DETECTION_API_VERSION: 5,
     createDetection: () => runtime,
   };
 }
@@ -71,6 +72,7 @@ describe('createLazyDetection', () => {
             preferredRegions: [],
             entityTypes: new Set(),
             idPacks: {},
+            keepCity: true,
           },
           { now: () => 0, yieldNow: () => Promise.resolve() },
         ),

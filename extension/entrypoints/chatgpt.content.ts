@@ -10,6 +10,7 @@ import {
 } from '@/src/content/settings.ts';
 import { vaultLifecycle } from '@/src/content/vault-lifecycle.ts';
 import { createVaultSession } from '@/src/content/vault-session.ts';
+import { loadWordList } from '@/src/content/word-lists.ts';
 import { createMainThreadYielder } from '@/src/content/yielder.ts';
 import { createCheckpoint } from '@/src/core/detect/schedule.ts';
 import type { DetectionConfig } from '@/src/core/detect/bundle.ts';
@@ -73,6 +74,7 @@ export default defineContentScript({
       preferredRegions: regions,
       entityTypes: from.entityTypes,
       idPacks: from.idPacks,
+      keepCity: from.keepCity,
     });
     const detection = createLazyDetection({
       // The module is set up with the stored settings, so it waits for them.
@@ -84,6 +86,7 @@ export default defineContentScript({
         module.createDetection(
           detectionConfig(current, languageRegions),
           yielder,
+          loadWordList,
         ),
     });
     settings.subscribe((next) => {
@@ -107,12 +110,16 @@ export default defineContentScript({
       normalise: async (found) => (await detection.ready()).normalise(found),
       engine: async () => {
         const runtime = await detection.ready();
-        return (request, seed, attempt) =>
-          runtime.standIn(request, seed, attempt);
+        return {
+          load: (requests) => runtime.loadWords(requests),
+          standIn: (request, seed, attempt) =>
+            runtime.standIn(request, seed, attempt),
+        };
       },
       // Any vault failure rejects, and the Send is blocked.
       mask: (items, issue) => session.mask(items, issue),
       isIssued: (value) => session.isIssued(value),
+      issued: () => session.issued(),
       peek: (items) => session.peek(items),
       entityTypes: () => current.entityTypes,
       checkpoint: () => createCheckpoint(yielder, { signal: ctx.signal }),

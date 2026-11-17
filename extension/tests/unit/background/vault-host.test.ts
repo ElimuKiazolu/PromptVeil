@@ -113,7 +113,16 @@ async function maskVia(
     const committed = await tab.send('vault.commit', {
       reused: [],
       conversationId,
-      entries: [{ item, standIn, standInNormalised: standIn }],
+      entries: [
+        {
+          item,
+          standIn,
+          standInNormalised: standIn,
+          variants: [],
+          locale: null,
+          parent: null,
+        },
+      ],
     });
     if (!committed.ok || committed.value.status !== 'ok') {
       throw new Error('not committed');
@@ -131,6 +140,9 @@ const entry = (item: MaskItem, standIn: string) => ({
   item,
   standIn,
   standInNormalised: standIn,
+  variants: [],
+  locale: null,
+  parent: null,
 });
 
 /** Lets fire-and-forget notices arrive. */
@@ -329,6 +341,9 @@ describe('vault requests', () => {
             real: DANA.value,
             normalised: DANA.normalised,
             type: 'EMAIL',
+            variants: [],
+            locale: null,
+            parent: null,
           },
         ],
         failed: 0,

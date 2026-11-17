@@ -733,7 +733,6 @@ describe('secret stand-ins', () => {
 describe('unsupported types', () => {
   it('throws for a type without a generator', () => {
     for (const real of [
-      request('PERSON', null, null, 'Dana Whitfield'),
       request('BANK', 'SWIFT_BIC', null, 'DEUTDEFF'),
       request('NATIONAL_ID', null, null, '123'),
     ]) {

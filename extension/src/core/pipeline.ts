@@ -15,13 +15,28 @@
  * values): a stand-in must not equal any value detected in the prompt (of
  * any type, compared by letters and digits, and by normal form for its own
  * type), must not appear in the rest of the prompt, and two new stand-ins
- * of one send must differ.
+ * of one send must differ. A PERSON stand-in's name parts must also differ
+ * from every real name part of the prompt and the conversation, from the
+ * other stand-ins' parts, and from the words of the rest of the prompt, so
+ * a single name part restores to one real name only.
+ *
+ * Linked values: an EMAIL whose local part spells a PERSON value of the
+ * send or the conversation is built from that person's stand-in (persons
+ * are issued first), and every address at one real domain gets the same
+ * stand-in domain.
  */
 import type { Detection, EntityType } from '../shared/entities.ts';
 import type { MaskItem } from '../shared/vault-protocol.ts';
 import type { Checkpoint } from './detect/schedule.ts';
 import { isSpikeStandIn } from './spike-standin.ts';
-import type { StandIn, StandInRequest } from './surrogate/types.ts';
+import { emailDomain, emailMatchesPerson } from './names/email-links.ts';
+import { nameParts } from './names/parts.ts';
+import type {
+  PersonLink,
+  StandIn,
+  StandInLinks,
+  StandInRequest,
+} from './surrogate/types.ts';
 
 /** Attempts per value before the send is blocked. */
 export const MAX_STAND_IN_ATTEMPTS = 20;
@@ -44,6 +59,12 @@ export interface CommitEntry {
   item: MaskItem;
   standIn: string;
   standInNormalised: string;
+  /** PERSON: the stand-in's name parts (stored as its variants). */
+  variants: readonly string[];
+  /** The word-list locale the stand-in came from. */
+  locale: string | null;
+  /** EMAIL: the stand-in of the PERSON it belongs to. */
+  parent: string | null;
 }
 
 export type CommittedValue =
@@ -81,6 +102,26 @@ export type StandInFactory = (
   seed: Uint8Array,
   attempt: number,
 ) => StandIn | null;
+
+/** The parts of a request that decide which word lists it needs. */
+export type WordRequest = Pick<
+  StandInRequest,
+  'type' | 'value' | 'country' | 'links'
+>;
+
+/** The stand-in engine of the detection module. */
+export interface StandInEngine {
+  /** Loads the word lists these requests need; rejects if one cannot load. */
+  load(requests: readonly WordRequest[]): Promise<void>;
+  standIn: StandInFactory;
+}
+
+/** A value already issued in the conversation (memory only). */
+export interface IssuedValue {
+  readonly type: EntityType;
+  readonly real: string;
+  readonly standIn: string;
+}
 
 /** Thrown when a value has no free stand-in after MAX_STAND_IN_ATTEMPTS. */
 export class StandInsExhaustedError extends Error {
@@ -140,25 +181,54 @@ export interface PromptView {
   readonly normalised: ReadonlySet<string>;
   /** The rest of the prompt (detected spans removed), compact. */
   readonly rest: string;
+  /** The rest's words, lower case. */
+  readonly words: ReadonlySet<string>;
+  /**
+   * Name parts a PERSON stand-in must not use (lower case): the real names'
+   * of the prompt and the conversation, and the conversation's stand-ins'.
+   * Parts chosen during the send are added.
+   */
+  readonly nameParts: Set<string>;
 }
+
+const WORDS = /[\p{L}\p{M}]+/gu;
 
 export function promptView(
   text: string,
   detections: readonly Detection[],
   items: readonly MaskItem[],
+  issued: readonly IssuedValue[] = [],
 ): PromptView {
   const spans = [...detections].sort((a, b) => a.start - b.start);
   let rest = '';
+  const words = new Set<string>();
+  const addWords = (part: string): void => {
+    for (const word of part.match(WORDS) ?? []) words.add(word.toLowerCase());
+  };
   let cursor = 0;
   for (const span of spans) {
     if (span.start < cursor) continue;
     // A separator that compact() drops would join the text around the
     // span; "|" never appears in a compact stand-in.
     rest += `${compact(text.slice(cursor, span.start))}|`;
+    addWords(text.slice(cursor, span.start));
     cursor = span.end;
   }
   rest += compact(text.slice(cursor));
+  addWords(text.slice(cursor));
+  const parts = new Set<string>();
+  const addParts = (name: string): void => {
+    for (const part of nameParts(name)) parts.add(part.toLowerCase());
+  };
+  for (const item of items) if (item.type === 'PERSON') addParts(item.value);
+  for (const value of issued) {
+    if (value.type !== 'PERSON') continue;
+    addParts(value.real);
+    addParts(value.standIn);
+  }
   return {
+    words,
+    nameParts: parts,
     detected: new Set(detections.map((detection) => compact(detection.value))),
     normalised: new Set(
       items.map((item) => `${item.type}\u0000${item.normalised}`),
@@ -177,7 +247,11 @@ export function fitsPrompt(
   return (
     !view.detected.has(form) &&
     !view.normalised.has(`${type}\u0000${standIn.normalised}`) &&
-    !view.rest.includes(form)
+    !view.rest.includes(form) &&
+    standIn.parts.every((part) => {
+      const lower = part.toLowerCase();
+      return !view.nameParts.has(lower) && !view.words.has(lower);
+    })
   );
 }
 
@@ -189,8 +263,30 @@ interface Pending {
   attempt: number;
 }
 
+/** How the values of one send relate to each other. */
+export interface IssueRelations {
+  /** Items of a higher stage are issued after every lower stage's. */
+  stageOf(item: MaskItem): number;
+  /** The values this item's stand-in must agree with. */
+  linksOf(item: MaskItem): StandInLinks | undefined;
+  /** A stand-in was picked for the item (it may still be taken). */
+  chosen(item: MaskItem, standIn: StandIn): void;
+  /** The item's stand-in is final (stored now or before). */
+  issued(item: MaskItem, standIn: string): void;
+}
+
+const NO_RELATIONS: IssueRelations = {
+  stageOf: () => 0,
+  linksOf: () => undefined,
+  chosen: () => undefined,
+  issued: () => undefined,
+};
+
 export interface IssueOptions {
   standIn: StandInFactory;
+  /** Loads the word lists the requests need, before they are generated. */
+  load?: (requests: readonly StandInRequest[]) => Promise<void>;
+  relations?: IssueRelations;
   fits: (item: MaskItem, standIn: StandIn) => boolean;
   now: number;
   /** Called between values, so long runs of generation yield (8 ms slices). */
@@ -204,8 +300,8 @@ export interface IssueOptions {
 /**
  * One stand-in per item, in order: stored ones as they are, new ones
  * generated, checked and committed, retrying taken ones with the next
- * attempt. Deterministic for a seed: the same collisions give the same
- * stand-ins.
+ * attempt, stage by stage (see IssueRelations). Deterministic for a seed:
+ * the same collisions give the same stand-ins.
  */
 export async function issueStandIns(
   items: readonly MaskItem[],
@@ -214,6 +310,7 @@ export async function issueStandIns(
 ): Promise<string[]> {
   const clock = options.clock ?? (() => 0);
   const timings = options.timings ?? { prepare: 0, generate: 0, commit: 0 };
+  const relations = options.relations ?? NO_RELATIONS;
   let started = clock();
   const prepared = await vault.prepare(items);
   timings.prepare += clock() - started;
@@ -221,7 +318,7 @@ export async function issueStandIns(
     throw new RangeError('one prepared value per item expected');
   }
   const standIns: (string | undefined)[] = [];
-  let pending: Pending[] = [];
+  const stages = new Map<number, Pending[]>();
   let reused: MaskItem[] = [];
   for (const [index, value] of prepared.values.entries()) {
     const item = items[index];
@@ -229,79 +326,159 @@ export async function issueStandIns(
     if (value.kind === 'existing') {
       standIns[index] = value.standIn;
       reused.push(item);
+      relations.issued(item, value.standIn);
     } else {
-      pending.push({ ...value, index, item, attempt: 0 });
+      const stage = relations.stageOf(item);
+      stages.set(stage, [
+        ...(stages.get(stage) ?? []),
+        { ...value, index, item, attempt: 0 },
+      ]);
     }
   }
 
+  const requestOf = (entry: Pending): StandInRequest => {
+    const links = relations.linksOf(entry.item);
+    return {
+      ...entry.item,
+      dateOffsetDays: prepared.dateOffsetDays,
+      number: entry.number,
+      now: options.now,
+      ...(links === undefined ? {} : { links }),
+    };
+  };
+
   // The first round runs even without new values: it counts the reuse.
   let first = true;
-  while (pending.length > 0 || first) {
-    const chosen = new Set(
-      standIns.flatMap((standIn) =>
-        standIn === undefined ? [] : [compact(standIn)],
-      ),
-    );
-    const entries: CommitEntry[] = [];
-    for (const entry of pending) {
-      const waiting = options.checkpoint?.();
-      if (waiting !== undefined) await waiting;
+  const order = [...stages.keys()].sort((a, b) => a - b);
+  if (order.length === 0) order.push(0);
+  for (const stage of order) {
+    let pending = stages.get(stage) ?? [];
+    while (pending.length > 0 || first) {
+      const chosen = new Set(
+        standIns.flatMap((standIn) =>
+          standIn === undefined ? [] : [compact(standIn)],
+        ),
+      );
+      if (pending.length > 0) await options.load?.(pending.map(requestOf));
+      const entries: CommitEntry[] = [];
+      for (const entry of pending) {
+        const waiting = options.checkpoint?.();
+        if (waiting !== undefined) await waiting;
+        started = clock();
+        // Built now: a stand-in domain chosen earlier in this round applies.
+        const request = requestOf(entry);
+        for (;;) {
+          if (entry.attempt >= MAX_STAND_IN_ATTEMPTS) {
+            throw new StandInsExhaustedError();
+          }
+          const standIn = options.standIn(request, entry.seed, entry.attempt);
+          if (
+            standIn !== null &&
+            !chosen.has(compact(standIn.value)) &&
+            options.fits(entry.item, standIn)
+          ) {
+            chosen.add(compact(standIn.value));
+            relations.chosen(entry.item, standIn);
+            entries.push({
+              item: entry.item,
+              standIn: standIn.value,
+              standInNormalised: standIn.normalised,
+              variants: standIn.parts,
+              locale: standIn.locale,
+              parent: request.links?.person?.standIn ?? null,
+            });
+            break;
+          }
+          entry.attempt += 1;
+        }
+        timings.generate += clock() - started;
+      }
       started = clock();
-      const request: StandInRequest = {
-        ...entry.item,
-        dateOffsetDays: prepared.dateOffsetDays,
-        number: entry.number,
-        now: options.now,
-      };
-      for (;;) {
-        if (entry.attempt >= MAX_STAND_IN_ATTEMPTS) {
-          throw new StandInsExhaustedError();
-        }
-        const standIn = options.standIn(request, entry.seed, entry.attempt);
-        if (
-          standIn !== null &&
-          !chosen.has(compact(standIn.value)) &&
-          options.fits(entry.item, standIn)
-        ) {
-          chosen.add(compact(standIn.value));
-          entries.push({
-            item: entry.item,
-            standIn: standIn.value,
-            standInNormalised: standIn.normalised,
-          });
-          break;
-        }
-        entry.attempt += 1;
+      const { values: committed, missing } = await vault.commit(
+        entries,
+        reused,
+      );
+      timings.commit += clock() - started;
+      if (missing > 0) throw new StaleStandInsError();
+      first = false;
+      reused = [];
+      if (committed.length !== entries.length) {
+        throw new RangeError('one commit result per entry expected');
       }
-      timings.generate += clock() - started;
-    }
-    started = clock();
-    const { values: committed, missing } = await vault.commit(entries, reused);
-    timings.commit += clock() - started;
-    if (missing > 0) throw new StaleStandInsError();
-    first = false;
-    reused = [];
-    if (committed.length !== entries.length) {
-      throw new RangeError('one commit result per entry expected');
-    }
-    const next: Pending[] = [];
-    for (const [position, result] of committed.entries()) {
-      const entry = pending[position];
-      if (entry === undefined) throw new RangeError('missing entry');
-      if (result.kind === 'taken') {
-        entry.attempt += 1;
-        next.push(entry);
-      } else {
-        standIns[entry.index] = result.standIn;
+      const next: Pending[] = [];
+      for (const [position, result] of committed.entries()) {
+        const entry = pending[position];
+        if (entry === undefined) throw new RangeError('missing entry');
+        if (result.kind === 'taken') {
+          entry.attempt += 1;
+          next.push(entry);
+        } else {
+          standIns[entry.index] = result.standIn;
+          relations.issued(entry.item, result.standIn);
+        }
       }
+      pending = next;
     }
-    pending = next;
   }
 
   return standIns.map((standIn) => {
     if (standIn === undefined) throw new RangeError('missing stand-in');
     return standIn;
   });
+}
+
+/**
+ * Links between the values of one send and the conversation's: emails to
+ * persons (issued first), real email domains to stand-in domains, and the
+ * name parts chosen so far (TR-S3).
+ */
+export function issueRelations(
+  items: readonly MaskItem[],
+  issued: readonly IssuedValue[],
+  view: PromptView,
+): IssueRelations {
+  const persons: PersonLink[] = issued
+    .filter((value) => value.type === 'PERSON')
+    .map((value) => ({ real: value.real, standIn: value.standIn }));
+  const domains = new Map<string, string>();
+  for (const value of issued) {
+    if (value.type === 'EMAIL') {
+      domains.set(emailDomain(value.real), emailDomain(value.standIn));
+    }
+  }
+  const sendPersons = items.filter((item) => item.type === 'PERSON');
+  return {
+    stageOf: (item) =>
+      item.type === 'EMAIL' &&
+      sendPersons.some((person) => emailMatchesPerson(item.value, person.value))
+        ? 1
+        : 0,
+    linksOf: (item) => {
+      if (item.type !== 'EMAIL') return undefined;
+      const person = persons.find((link) =>
+        emailMatchesPerson(item.value, link.real),
+      );
+      const domain = domains.get(emailDomain(item.value));
+      if (person === undefined && domain === undefined) return undefined;
+      return {
+        ...(person === undefined ? {} : { person }),
+        ...(domain === undefined ? {} : { domain }),
+      };
+    },
+    chosen: (item, standIn) => {
+      if (item.type === 'EMAIL') {
+        const real = emailDomain(item.value);
+        if (!domains.has(real)) domains.set(real, emailDomain(standIn.value));
+      }
+      for (const part of standIn.parts) view.nameParts.add(part.toLowerCase());
+    },
+    issued: (item, standIn) => {
+      // This send's persons come first: an address names the person
+      // written next to it before one from earlier in the chat.
+      if (item.type === 'PERSON')
+        persons.unshift({ real: item.value, standIn });
+    },
+  };
 }
 
 export interface PipelineOptions {
@@ -313,7 +490,7 @@ export interface PipelineOptions {
    * The stand-in engine (the detection module's, so it waits for the module
    * to load; a load failure rejects and blocks the send).
    */
-  engine: () => Promise<StandInFactory>;
+  engine: () => Promise<StandInEngine>;
   /**
    * Runs `issue` against the current conversation's vault and returns its
    * stand-ins (the vault session; it rejects if the conversation changed).
@@ -324,6 +501,8 @@ export interface PipelineOptions {
   ) => Promise<readonly string[]>;
   /** True for a stand-in already issued in the current conversation. */
   isIssued: (value: string) => boolean;
+  /** The current conversation's issued values (links, TR-S3 name parts). */
+  issued?: () => readonly IssuedValue[];
   /** The types masked now (settings, limited to MASKABLE_TYPES). */
   entityTypes: () => ReadonlySet<EntityType>;
   /** A fresh checkpoint per send, for slicing generation. */
@@ -390,7 +569,11 @@ export function createPipeline(options: PipelineOptions): Pipeline {
 
   const prepare = async (text: string): Promise<void> => {
     const { items } = await collect(await detect(text));
-    if (items.size > 0) await options.peek?.([...items.values()]);
+    if (items.size === 0) return;
+    const values = [...items.values()];
+    // The word lists a Send of this draft needs, loaded ahead.
+    await (await options.engine()).load(values);
+    await options.peek?.(values);
   };
 
   const transform = async (text: string): Promise<string> => {
@@ -413,11 +596,14 @@ export function createPipeline(options: PipelineOptions): Pipeline {
 
     const unique = [...items.entries()];
     const uniqueItems = unique.map(([, item]) => item);
-    const view = promptView(text, detections, uniqueItems);
+    const issued = options.issued?.() ?? [];
+    const view = promptView(text, detections, uniqueItems, issued);
     const engine = await options.engine();
     const standIns = await options.mask(uniqueItems, (vault) =>
       issueStandIns(uniqueItems, vault, {
-        standIn: engine,
+        standIn: engine.standIn,
+        load: (requests) => engine.load(requests),
+        relations: issueRelations(uniqueItems, issued, view),
         // A stand-in this conversation already uses is skipped here, so it
         // costs no commit round trip (the vault checks it again).
         fits: (item, standIn) =>

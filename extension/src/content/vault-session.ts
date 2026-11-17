@@ -15,14 +15,19 @@
  * - Loading (page start, conversation change, another tab's send) asks for
  *   the stored mappings; the request safety net learns them before the
  *   restorer may show any real value.
+ * - A PERSON mapping also restores its single name parts ("Hughes" alone),
+ *   paired by position with the real name's parts, when that stand-in part
+ *   stands for one real part only in the conversation.
  *
  * Vault operations run one at a time in the order they were asked for, so a
  * send always masks into the conversation its migration finished moving.
  */
 import type { SiteAdapter } from '@/src/adapters/types.ts';
+import { nameParts } from '@/src/core/names/parts.ts';
 import {
   StaleStandInsError,
   type CommittedValue,
+  type IssuedValue,
   type IssueVault,
   type PreparedValue,
 } from '@/src/core/pipeline.ts';
@@ -43,6 +48,7 @@ import type { Messenger, Protocol } from '@/src/shared/messaging.ts';
 import type { EntityType } from '@/src/shared/entities.ts';
 import {
   MAX_MASK_ITEMS,
+  MAX_VARIANTS,
   type MaskItem,
   type PreparedItem,
   type VaultFailure,
@@ -114,6 +120,8 @@ export interface VaultSession {
   peek(items: readonly MaskItem[]): Promise<void>;
   /** True for a stand-in of the current conversation. */
   isIssued(value: string): boolean;
+  /** The current conversation's values and stand-ins (memory only). */
+  issued(): readonly IssuedValue[];
   handleNotice(notice: VaultNotice): void;
   /** Forgets the real values (page hidden); `resume` loads them again. */
   clear(): void;
@@ -125,6 +133,49 @@ export interface VaultSession {
 
 function boundaryFor(type: EntityType): BoundaryRule {
   return type === 'EMAIL' ? 'email' : 'word';
+}
+
+/** A value of the conversation as the session holds it. */
+interface Held extends IssuedValue {
+  readonly mapping: StandInMapping;
+  /** PERSON: the stand-in's name parts, as stored or as just issued. */
+  readonly parts: readonly string[];
+}
+
+/**
+ * Mappings for single name parts: each stand-in part (two letters or more)
+ * that stands for exactly one real part across the conversation.
+ */
+function partMappings(held: Iterable<Held>): StandInMapping[] {
+  const reals = new Map<string, Map<string, string>>();
+  const shown = new Map<string, string>();
+  for (const value of held) {
+    if (value.type !== 'PERSON') continue;
+    const realParts = nameParts(value.real);
+    if (realParts.length !== value.parts.length || realParts.length < 2) {
+      continue;
+    }
+    for (const [i, part] of value.parts.entries()) {
+      const real = realParts[i];
+      if (real === undefined || Array.from(part).length < 2) continue;
+      const key = part.toLowerCase();
+      const forms = reals.get(key) ?? new Map<string, string>();
+      forms.set(real.toLowerCase(), real);
+      reals.set(key, forms);
+      shown.set(key, part);
+    }
+  }
+  const out: StandInMapping[] = [];
+  for (const [key, forms] of reals) {
+    const standIn = shown.get(key);
+    const [real] = forms.values();
+    if (forms.size !== 1 || standIn === undefined || real === undefined) {
+      continue;
+    }
+    // The whole name is what the request safety net checks.
+    out.push({ standIn, real, boundary: 'name', netForms: [] });
+  }
+  return out;
 }
 
 function failureReason(failure: VaultFailure): DevReason {
@@ -200,7 +251,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
   const { adapter, messenger, beforePublish, randomUUID } = options;
   const site = adapter.id;
 
-  const byStandIn = new Map<string, StandInMapping>();
+  const byStandIn = new Map<string, Held>();
   let mappings: readonly StandInMapping[] = [];
   let version = 0;
   const listeners = new Set<() => void>();
@@ -260,7 +311,15 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
   };
 
   const publish = (): void => {
-    mappings = [...byStandIn.values()];
+    const whole = [...byStandIn.values()];
+    const wholeKeys = new Set(byStandIn.keys());
+    mappings = [
+      ...whole.map((value) => value.mapping),
+      // A part never shadows a whole stand-in written the same way.
+      ...partMappings(whole).filter(
+        (part) => !wholeKeys.has(part.standIn.toLowerCase()),
+      ),
+    ];
     beforePublish(mappings);
     version += 1;
     for (const listener of listeners) listener();
@@ -271,15 +330,22 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     real: string,
     type: EntityType,
     normalised: string,
+    parts: readonly string[],
   ): boolean => {
     const key = standIn.toLowerCase();
     if (byStandIn.has(key)) return false;
     byStandIn.set(key, {
-      standIn,
+      type,
       real,
-      boundary: boundaryFor(type),
-      netForms: netForms(type, real, normalised),
-      variants: variantsFor(type, standIn, normalised),
+      standIn,
+      parts,
+      mapping: {
+        standIn,
+        real,
+        boundary: boundaryFor(type),
+        netForms: netForms(type, real, normalised),
+        variants: variantsFor(type, standIn, normalised),
+      },
     });
     return true;
   };
@@ -325,7 +391,13 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       let added = 0;
       for (const mapping of reply.mappings) {
         if (
-          add(mapping.standIn, mapping.real, mapping.type, mapping.normalised)
+          add(
+            mapping.standIn,
+            mapping.real,
+            mapping.type,
+            mapping.normalised,
+            mapping.variants,
+          )
         ) {
           added += 1;
         }
@@ -456,7 +528,14 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
             'vault.commit',
             {
               conversationId: target.id,
-              entries: batch.entries,
+              entries: batch.entries.map((entry) => ({
+                ...entry,
+                // Too many parts to store: the whole name still restores.
+                variants:
+                  entry.variants.length <= MAX_VARIANTS
+                    ? [...entry.variants]
+                    : [],
+              })),
               reused: batch.reused,
             },
             { timeoutMs: MASK_TIMEOUT_MS },
@@ -521,7 +600,13 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
         const item = items[index];
         if (
           item !== undefined &&
-          add(standIn, item.value, item.type, item.normalised)
+          add(
+            standIn,
+            item.value,
+            item.type,
+            item.normalised,
+            item.type === 'PERSON' ? nameParts(standIn) : [],
+          )
         ) {
           added = true;
         }
@@ -615,6 +700,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     mask,
     peek,
     isIssued: (value) => byStandIn.has(value.toLowerCase()),
+    issued: () => [...byStandIn.values()],
     handleNotice,
     clear: () => {
       generation += 1;

@@ -1,6 +1,22 @@
 import type { CountryCode } from '../../shared/country.ts';
 import type { EntitySubtype, EntityType } from '../../shared/entities.ts';
 import type { Rng } from './rng.ts';
+import type { LocaleId } from './words/locales.ts';
+import type { WordLists } from './words/store.ts';
+
+/** A PERSON value and its stand-in (memory only). */
+export interface PersonLink {
+  readonly real: string;
+  readonly standIn: string;
+}
+
+/** Other values a stand-in must agree with (memory only). */
+export interface StandInLinks {
+  /** EMAIL: the person the address belongs to; its local part follows. */
+  readonly person?: PersonLink;
+  /** EMAIL: the stand-in domain already used for this real domain. */
+  readonly domain?: string;
+}
 
 /** One real value to make a stand-in for (memory only). */
 export interface StandInRequest {
@@ -13,10 +29,21 @@ export interface StandInRequest {
   readonly normalised: string;
   /** The conversation's date offset (birth dates inside IDs move by it). */
   readonly dateOffsetDays: number;
-  /** The mapping's number in its conversation (the email stand-in shows it). */
+  /** The mapping's number in its conversation. */
   readonly number: number;
   /** Now, in ms (birth dates are never shifted into the future). */
   readonly now: number;
+  readonly links?: StandInLinks;
+}
+
+/** What generators may read besides the request. */
+export interface StandInEnvironment {
+  /** Word lists loaded so far (the pipeline loads what a send needs). */
+  readonly words: WordLists;
+  /** Locales of the home regions, then of the browser languages' regions. */
+  readonly preferredLocales: readonly LocaleId[];
+  /** ADDRESS: keep the city (settings.keepCity). */
+  readonly keepCity: boolean;
 }
 
 export interface StandIn {
@@ -26,6 +53,10 @@ export interface StandIn {
   readonly normalised: string;
   /** True when it comes from a range reserved for fiction, tests or examples. */
   readonly reserved: boolean;
+  /** The word-list locale it was drawn from, if any. */
+  readonly locale: LocaleId | null;
+  /** PERSON: the stand-in's name parts (see nameParts), else empty. */
+  readonly parts: readonly string[];
 }
 
 export interface GeneratorContext {
@@ -37,11 +68,13 @@ export interface GeneratorContext {
   readonly attempt: number;
   /** True while reserved ranges may be used (the first attempts). */
   readonly reservedAllowed: boolean;
+  readonly env: StandInEnvironment;
 }
 
 export interface Generated {
   readonly value: string;
   readonly reserved: boolean;
+  readonly locale?: LocaleId;
 }
 
 /** A stand-in for the request, or null when this attempt has none. */

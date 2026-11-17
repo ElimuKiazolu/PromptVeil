@@ -54,6 +54,12 @@ describe('parsePipelineSettings', () => {
     expect(settings.homeRegions).toEqual(['GB', 'BR']);
   });
 
+  it('keeps the city in address stand-ins unless switched off', () => {
+    expect(DEFAULT_PIPELINE_SETTINGS.keepCity).toBe(true);
+    expect(parsePipelineSettings({ keepCity: false }).keepCity).toBe(false);
+    expect(parsePipelineSettings({ keepCity: 'no' }).keepCity).toBe(true);
+  });
+
   it('takes home regions from the browser languages until they are set', () => {
     expect(effectiveHomeRegions(DEFAULT_PIPELINE_SETTINGS, ['FR'])).toEqual([
       'FR',

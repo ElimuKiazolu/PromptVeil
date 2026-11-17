@@ -84,6 +84,9 @@ describe('vault message shapes', () => {
     item: ITEM,
     standIn: 'standin.1@example.net',
     standInNormalised: 'standin.1@example.net',
+    variants: [],
+    locale: null,
+    parent: null,
   };
   const load = VAULT_PROTOCOL['vault.load'];
   const migrate = VAULT_PROTOCOL['vault.migrate'];
@@ -218,7 +221,17 @@ describe('vault message shapes', () => {
     expect(
       load.response({
         status: 'ok',
-        mappings: [{ standIn: 's', real: 'r', normalised: 'r', type: 'EMAIL' }],
+        mappings: [
+          {
+            standIn: 's',
+            real: 'r',
+            normalised: 'r',
+            type: 'EMAIL',
+            variants: [],
+            locale: null,
+            parent: null,
+          },
+        ],
         failed: 0,
       }),
     ).toBe(true);

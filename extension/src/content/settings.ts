@@ -17,9 +17,11 @@ export interface PipelineSettings {
   readonly idPacks: Readonly<Partial<Record<CountryCode, boolean>>>;
   /** From settings; empty until onboarding stores them. */
   readonly homeRegions: readonly CountryCode[];
+  /** ADDRESS stand-ins keep the city. */
+  readonly keepCity: boolean;
 }
 
-const KEYS = ['entityTypes', 'idPacks', 'homeRegions'] as const;
+const KEYS = ['entityTypes', 'idPacks', 'homeRegions', 'keepCity'] as const;
 
 export interface SettingsStorageLike {
   get(keys: string[]): Promise<Record<string, unknown>>;
@@ -76,6 +78,10 @@ export function parsePipelineSettings(
     entityTypes: entityTypes(stored.entityTypes),
     idPacks: idPacks(stored.idPacks),
     homeRegions: homeRegions(stored.homeRegions),
+    keepCity:
+      typeof stored.keepCity === 'boolean'
+        ? stored.keepCity
+        : DEFAULT_SETTINGS.keepCity,
   };
 }
 
