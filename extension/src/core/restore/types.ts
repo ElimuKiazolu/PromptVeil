@@ -6,8 +6,11 @@
  * - 'name': like 'word', and written exactly as the stand-in (or in
  *   capitals): a single part of a person's name ("Hughes"), which in other
  *   case ("will", "rose") is usually an ordinary word.
+ * - 'exact': like 'word', and written exactly as the stand-in: a value whose
+ *   case is part of it (a Base58 address in another case is another,
+ *   invalid address).
  */
-export type BoundaryRule = 'email' | 'word' | 'name';
+export type BoundaryRule = 'email' | 'word' | 'name' | 'exact';
 
 /** One stand-in shown to the chatbot and the real value it replaced. */
 export interface StandInMapping {

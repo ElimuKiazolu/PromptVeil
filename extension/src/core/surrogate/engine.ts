@@ -31,12 +31,14 @@ import {
   isWellFormedAddressStandIn,
 } from './address.ts';
 import { cardStandIn } from './card.ts';
+import { cryptoStandIn, isWellFormedCryptoStandIn } from './crypto.ts';
 import {
   emailLocale,
   emailStandIn,
   isWellFormedEmailStandIn,
 } from './email.ts';
 import { ibanStandIn } from './iban.ts';
+import { ipStandIn, isWellFormedIpStandIn } from './ip.ts';
 import { nationalIdStandIn } from './national-id.ts';
 import { nameParts } from '../names/parts.ts';
 import { isWellFormedOrgStandIn, orgLocale, orgStandIn } from './org.ts';
@@ -139,6 +141,10 @@ function generatorFor(request: StandInRequest): Generator {
       break;
     case 'SECRET':
       return secretStandIn;
+    case 'IP':
+      return ipStandIn;
+    case 'CRYPTO':
+      return cryptoStandIn;
     case 'NATIONAL_ID':
       if (request.subtype !== null && SPECS.has(request.subtype)) {
         return nationalIdStandIn;
@@ -181,6 +187,10 @@ export function isWellFormedStandIn(
     }
     case 'SECRET':
       return isWellFormedSecretStandIn(standIn, request.value);
+    case 'IP':
+      return isWellFormedIpStandIn(standIn, request.value);
+    case 'CRYPTO':
+      return isWellFormedCryptoStandIn(standIn, request.value);
     case 'NATIONAL_ID': {
       const spec =
         request.subtype === null ? undefined : SPECS.get(request.subtype);

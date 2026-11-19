@@ -14,6 +14,7 @@ export interface RulesConfig {
   readonly preferredRegions: readonly CountryCode[];
   readonly entityTypes: ReadonlySet<EntityType>;
   readonly packs: readonly CountryPack[];
+  readonly maskPrivateIps: boolean;
 }
 
 /** Detects with the rules only; nothing is excluded at this stage. */

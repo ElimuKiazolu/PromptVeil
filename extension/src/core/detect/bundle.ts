@@ -44,6 +44,8 @@ export interface DetectionConfig {
   readonly idPacks: Readonly<Partial<Record<CountryCode, boolean>>>;
   /** ADDRESS stand-ins keep the city (settings.keepCity). */
   readonly keepCity: boolean;
+  /** Detect private and other local IP addresses (settings.maskPrivateIps). */
+  readonly maskPrivateIps: boolean;
 }
 
 /** The parts of a stand-in request that decide its word lists. */
@@ -127,6 +129,7 @@ export function createDetection(
         preferredRegions: settings.preferredRegions,
         entityTypes: settings.entityTypes,
         packs: enabledPacks(COUNTRY_PACKS, settings.idPacks),
+        maskPrivateIps: settings.maskPrivateIps,
       }),
       yielder,
       onClear: clearRuleCaches,

@@ -22,6 +22,7 @@ describe('detection module entry', () => {
         entityTypes: new Set(['EMAIL', 'NATIONAL_ID']),
         idPacks: { BR: false },
         keepCity: true,
+        maskPrivateIps: false,
       },
       immediate,
     );
@@ -48,6 +49,7 @@ describe('detection module entry', () => {
         entityTypes: new Set(['EMAIL', 'PHONE']),
         idPacks: {},
         keepCity: true,
+        maskPrivateIps: false,
       },
       immediate,
     );
@@ -69,6 +71,7 @@ describe('detection module entry', () => {
         entityTypes: new Set(['PHONE']),
         idPacks: {},
         keepCity: true,
+        maskPrivateIps: false,
       },
       immediate,
     );
@@ -96,6 +99,7 @@ describe('stand-in engine in the detection module', () => {
         entityTypes: new Set(['EMAIL']),
         idPacks: {},
         keepCity: true,
+        maskPrivateIps: false,
       },
       immediate,
       diskWordLoader,

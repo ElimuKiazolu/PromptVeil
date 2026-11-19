@@ -75,6 +75,7 @@ export default defineContentScript({
       entityTypes: from.entityTypes,
       idPacks: from.idPacks,
       keepCity: from.keepCity,
+      maskPrivateIps: from.maskPrivateIps,
     });
     const detection = createLazyDetection({
       // The module is set up with the stored settings, so it waits for them.

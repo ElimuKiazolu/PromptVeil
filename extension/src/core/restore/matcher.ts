@@ -23,7 +23,7 @@ function isDelimited(
 ): boolean {
   const before = text.charAt(start - 1);
   const after = text.charAt(end);
-  if (rule === 'word' || rule === 'name') {
+  if (rule !== 'email') {
     return !WORD_CHAR.test(before) && !WORD_CHAR.test(after);
   }
   if (EMAIL_BEFORE.test(before) || EMAIL_AFTER.test(after)) return false;
@@ -34,8 +34,12 @@ function isDelimited(
 const isCapitals = (text: string): boolean =>
   text === text.toUpperCase() && text !== text.toLowerCase();
 
-/** A name part counts only as written or in capitals. */
+/**
+ * A name part counts only as written or in capitals; an exact-case value
+ * only as written.
+ */
 function caseFits(shown: string, mapping: StandInMapping): boolean {
+  if (mapping.boundary === 'exact') return shown === mapping.standIn;
   return (
     mapping.boundary !== 'name' ||
     shown === mapping.standIn ||
@@ -45,7 +49,9 @@ function caseFits(shown: string, mapping: StandInMapping): boolean {
 
 /** An address or a name part shown in capitals comes back in capitals. */
 function realAsShown(shown: string, mapping: StandInMapping): string {
-  if (mapping.boundary === 'word') return mapping.real;
+  if (mapping.boundary === 'word' || mapping.boundary === 'exact') {
+    return mapping.real;
+  }
   return isCapitals(shown) ? mapping.real.toUpperCase() : mapping.real;
 }
 

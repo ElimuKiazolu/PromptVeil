@@ -36,7 +36,7 @@ describe('normaliseReal', () => {
     );
     expect(normaliseReal('POSTCODE', null, 'GB', 'sw1a 1aa')).toBe('SW1A1AA');
     expect(normaliseReal('SECRET', null, null, 'AbC-123')).toBe('AbC-123');
-    expect(normaliseReal('CRYPTO', null, null, ' 1AbC ')).toBe(' 1AbC ');
+    expect(normaliseReal('CRYPTO', null, null, ' 1AbC ')).toBe('1AbC');
     expect(normaliseReal('DATE', null, null, ' 1 May 2020 ')).toBe(
       '1 May 2020',
     );

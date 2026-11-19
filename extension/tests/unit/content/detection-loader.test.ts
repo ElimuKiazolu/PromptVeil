@@ -73,6 +73,7 @@ describe('createLazyDetection', () => {
             entityTypes: new Set(),
             idPacks: {},
             keepCity: true,
+            maskPrivateIps: false,
           },
           { now: () => 0, yieldNow: () => Promise.resolve() },
         ),

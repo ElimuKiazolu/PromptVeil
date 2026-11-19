@@ -60,6 +60,16 @@ describe('parsePipelineSettings', () => {
     expect(parsePipelineSettings({ keepCity: 'no' }).keepCity).toBe(true);
   });
 
+  it('leaves private IP addresses alone unless switched on', () => {
+    expect(DEFAULT_PIPELINE_SETTINGS.maskPrivateIps).toBe(false);
+    expect(parsePipelineSettings({ maskPrivateIps: true }).maskPrivateIps).toBe(
+      true,
+    );
+    expect(parsePipelineSettings({ maskPrivateIps: 1 }).maskPrivateIps).toBe(
+      false,
+    );
+  });
+
   it('takes home regions from the browser languages until they are set', () => {
     expect(effectiveHomeRegions(DEFAULT_PIPELINE_SETTINGS, ['FR'])).toEqual([
       'FR',

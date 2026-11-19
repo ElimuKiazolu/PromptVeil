@@ -175,6 +175,7 @@ describe('rules analysis', () => {
         preferredRegions: [],
         entityTypes: new Set(['EMAIL', 'PHONE']),
         packs: [],
+        maskPrivateIps: false,
       }),
       yielder: immediate,
       onClear: clearRuleCaches,

@@ -26,8 +26,11 @@ import { alphanumerics } from '@/src/core/surrogate/layout.ts';
 import { isReservedPhone } from '@/src/core/surrogate/phone.ts';
 import {
   AWS_EXAMPLE_ACCESS_KEY_IDS,
+  PUBLISHED_TEST_CARD_NUMBERS,
   TEST_CARDS,
 } from '@/src/core/detect/validators/reserved-values.ts';
+import { validateCard } from '@/src/core/detect/validators/card.ts';
+import { TestCardsExhaustedError } from '@/src/core/surrogate/card.ts';
 import type { StandInRequest } from '@/src/core/surrogate/types.ts';
 import type { CountryCode } from '@/src/shared/country.ts';
 import type { EntitySubtype, EntityType } from '@/src/shared/entities.ts';
@@ -157,20 +160,6 @@ const CASES: Record<string, Case> = {
     country: 'DE',
     values: ['+49 1512 3456789', '+91 81234 56789'],
     reserved: false,
-  },
-  CARD: {
-    type: 'CARD',
-    subtype: null,
-    country: null,
-    values: [
-      '4242 4242 4242 4242',
-      '4111-1111-1111-1111',
-      '5555555555554444',
-      '3782 822463 10005',
-      '36227206271667',
-      '6205500000000000004',
-    ],
-    reserved: true,
   },
   IBAN: {
     type: 'BANK',
@@ -474,6 +463,15 @@ describe('reserved ranges', () => {
         exclude: [],
       })
     ).map((detection) => `${detection.type}/${detection.subtype ?? '-'}`);
+  const confirmed = async (text: string, home: CountryCode) =>
+    (
+      await detectRules(text, {
+        homeRegions: [home],
+        entityTypes: new Set<EntityType>(['PHONE']),
+        packs: COUNTRY_PACKS,
+        exclude: [],
+      })
+    ).filter((detection) => detection.status === 'confirmed');
 
   it('phone stand-ins from fiction ranges are never detected again', async () => {
     const cases: [CountryCode, string][] = [
@@ -496,13 +494,24 @@ describe('reserved ranges', () => {
           [],
         );
       }
-      // A random stand-in looks real: it is detected (and excluded as an
-      // issued stand-in by the masker).
-      const random = generateStandIn(real, seed(1), RESERVED_ATTEMPTS);
-      if (random === null) throw new Error('no stand-in');
-      expect(await detected(`Call me on ${random.value}.`, country)).toEqual([
-        'PHONE/-',
-      ]);
+      // Past the fiction ranges, an unallocated number: valid in no region
+      // of its calling code, so the home region never confirms it.
+      const later = generateStandIn(real, seed(1), RESERVED_ATTEMPTS);
+      if (later === null) throw new Error('no stand-in');
+      const readings = await confirmed(`Call me on ${later.value}.`, country);
+      expect(readings.map((reading) => reading.country)).not.toContain(country);
+    }
+    // Written with "+" and the calling code, it is no phone number at all.
+    for (const value of ['+44 7400 123456', '+33 6 12 34 56 78']) {
+      const real = request('PHONE', null, null, value);
+      for (let n = 0; n < 20; n += 1) {
+        const later = generateStandIn(real, seed(n), RESERVED_ATTEMPTS);
+        if (later === null) throw new Error('no stand-in');
+        expect(
+          await confirmed(`Call me on ${later.value}.`, 'GB'),
+          later.value,
+        ).toEqual([]);
+      }
     }
   });
 
@@ -580,20 +589,71 @@ describe('reserved ranges', () => {
     }
   });
 
-  it('moves on to new test cards attempt by attempt, then to random numbers', () => {
-    const real = request('CARD', null, null, '4111111111111111');
-    const values = Array.from(
-      { length: RESERVED_ATTEMPTS },
-      (_, attempt) => generateStandIn(real, seed(4), attempt)?.value,
+  it('takes every card stand-in from the published test numbers', () => {
+    for (const value of [
+      '4242 4242 4242 4242',
+      '4111-1111-1111-1111',
+      '5555555555554444',
+      '3782 822463 10005',
+      '36227206271667',
+    ]) {
+      const real = request('CARD', null, null, value);
+      const digits = alphanumerics(value);
+      const brand = Object.entries(TEST_CARDS).find(([, numbers]) =>
+        numbers.some((number) => number.length === digits.length),
+      );
+      const list = Object.values(TEST_CARDS)
+        .flat()
+        .filter((number) => number.length === digits.length);
+      for (let n = 0; n < 20; n += 1) {
+        const seen = new Set<string>();
+        for (let attempt = 0; attempt < 4; attempt += 1) {
+          const standIn = generateStandIn(real, seed(n), attempt);
+          if (standIn === null) throw new Error('no stand-in');
+          const number = alphanumerics(standIn.value);
+          expect(list, standIn.value).toContain(number);
+          expect(standIn.reserved).toBe(true);
+          expect(isWellFormedStandIn(real, standIn.value)).toBe(true);
+          expect(shape(standIn.value)).toBe(shape(value));
+          seen.add(number);
+        }
+        // A new test number per attempt.
+        expect(seen.size).toBe(4);
+      }
+      expect(brand).toBeDefined();
+    }
+  });
+
+  it('blocks once a value has tried every test number of its brand and length', () => {
+    // Braintree's two Amex numbers that verify successfully are left for
+    // other values: count what this brand and length has.
+    const real = request('CARD', null, null, '3782 822463 10005');
+    const count = TEST_CARDS.amex.filter(
+      (number) => number.length === 15 && number !== '378282246310005',
+    ).length;
+    expect(count).toBeGreaterThan(10);
+    expect(generateStandIn(real, seed(4), count - 1)).not.toBeNull();
+    expect(() => generateStandIn(real, seed(4), count)).toThrow(
+      TestCardsExhaustedError,
     );
-    expect(new Set(values).size).toBe(RESERVED_ATTEMPTS);
-    expect(values.every((value) => TEST_CARDS.visa.includes(value ?? ''))).toBe(
-      true,
+    // No published test number of this brand and length: blocked at once.
+    const unionPay19 = request('CARD', null, null, '6205500000000000004');
+    expect(() => generateStandIn(unionPay19, seed(4), 0)).toThrow(
+      TestCardsExhaustedError,
     );
-    // Amex has two test numbers: attempt 2 is already random.
-    const amex = request('CARD', null, null, '371449635398431');
-    expect(generateStandIn(amex, seed(4), 0)?.value).toBe('378282246310005');
-    expect(generateStandIn(amex, seed(4), 1)?.reserved).toBe(false);
+  });
+
+  it('lists only valid cards, each published number once', () => {
+    for (const number of PUBLISHED_TEST_CARD_NUMBERS) {
+      expect(validateCard(number).valid, number).toBe(true);
+    }
+    const listed = Object.values(TEST_CARDS).flat();
+    expect(new Set(listed).size).toBe(listed.length);
+    // Kept detectable for the tests: never stand-ins.
+    expect(listed).not.toContain('4111111111111111');
+    expect(listed).not.toContain('370000000000002');
+    expect(TEST_CARDS.visa.length).toBeGreaterThan(70);
+    expect(TEST_CARDS.mastercard.length).toBeGreaterThan(40);
   });
 });
 

@@ -55,6 +55,8 @@ export interface RuleEnv {
   readonly hasContext: boolean;
   /** For validators with long-running work (the all-region phone pass). */
   readonly checkpoint: Checkpoint;
+  /** Report private, loopback and other local IP addresses too. */
+  readonly maskPrivateIps?: boolean;
 }
 
 export interface Finding {

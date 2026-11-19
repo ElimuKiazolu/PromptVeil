@@ -49,6 +49,8 @@ export const MASKABLE_TYPES: ReadonlySet<EntityType> = new Set<EntityType>([
   'BANK',
   'SECRET',
   'NATIONAL_ID',
+  'IP',
+  'CRYPTO',
 ]);
 
 export type PreparedValue =

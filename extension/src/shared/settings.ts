@@ -25,6 +25,8 @@ export interface Settings {
   nerThreshold: number;
   /** Keep the city (and country) of an address unchanged in its stand-in. */
   keepCity: boolean;
+  /** Mask private, loopback and other local IP addresses too (TR §4.2). */
+  maskPrivateIps: boolean;
   riskMeter: { enabled: boolean; confirmOnHigh: boolean };
   /** Days before unused conversation mappings are deleted; 0 keeps them forever. */
   retentionDays: number;
@@ -81,6 +83,7 @@ export const DEFAULT_SETTINGS = {
   },
   nerThreshold: 0.6,
   keepCity: true,
+  maskPrivateIps: false,
   riskMeter: { enabled: true, confirmOnHigh: true },
   retentionDays: 30,
   restoreTooltips: true,

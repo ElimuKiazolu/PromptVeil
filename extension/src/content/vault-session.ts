@@ -131,8 +131,12 @@ export interface VaultSession {
   dispose(): void;
 }
 
-function boundaryFor(type: EntityType): BoundaryRule {
-  return type === 'EMAIL' ? 'email' : 'word';
+/** Legacy Bitcoin addresses: Base58, where the case is part of the value. */
+const BASE58_ADDRESS = /^[13mn2][1-9A-HJ-NP-Za-km-z]{24,34}$/u;
+
+function boundaryFor(type: EntityType, standIn: string): BoundaryRule {
+  if (type === 'EMAIL') return 'email';
+  return type === 'CRYPTO' && BASE58_ADDRESS.test(standIn) ? 'exact' : 'word';
 }
 
 /** A value of the conversation as the session holds it. */
@@ -342,7 +346,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       mapping: {
         standIn,
         real,
-        boundary: boundaryFor(type),
+        boundary: boundaryFor(type, standIn),
         netForms: netForms(type, real, normalised),
         variants: variantsFor(type, standIn, normalised),
       },

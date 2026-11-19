@@ -7,10 +7,17 @@
  *
  * The new number comes from a range reserved for fiction when one fits
  * (same calling code, length and kind of number; for geographic ranges the
- * real number's area first, see fictional-phones.ts). Otherwise it is a
- * random number that libphonenumber accepts as valid, of the same type
- * (mobile, fixed line), keeping the first digit (then the first three) of
- * the real number so the type usually stays the same.
+ * real number's area first, see fictional-phones.ts). Otherwise it is an
+ * unallocated number (owner, P5.3): one libphonenumber (max metadata) calls
+ * possible for the calling code (the right length) but valid in none of its
+ * regions, so it is in no range the numbering plan has handed out and no
+ * chatbot tool or agent can reach anyone with it. Within a mobile or fixed
+ * prefix nearly every number counts as allocated, so the leading digits are
+ * drawn too and the stand-in no longer shows the kind of number. Every
+ * region has such numbers at its numbers' lengths (at least 2 % of random
+ * ones, measured over all 245 regions), so RANDOM_DRAWS practically always
+ * finds one. The check runs with the shipped metadata, so a range allocated
+ * in a later version is refused from then on (isWellFormedPhoneStandIn).
  */
 import {
   isSupportedCountry,
@@ -21,7 +28,6 @@ import {
 import {
   FICTIONAL_PHONE_RANGES,
   inFictionalRange,
-  isFictionalPhone,
   kindFits,
   type FictionalPhoneRange,
 } from '../detect/validators/fictional-phones.ts';
@@ -30,7 +36,7 @@ import { DIGITS, type Rng } from './rng.ts';
 import type { Generator } from './types.ts';
 
 /** Random numbers tried before giving up on an attempt. */
-const RANDOM_DRAWS = 400;
+const RANDOM_DRAWS = 1000;
 const SPACES = /[\u00A0\u2007\u2009\u202F]/gu;
 
 function parse(raw: string, region: PhoneRegion | undefined) {
@@ -38,18 +44,6 @@ function parse(raw: string, region: PhoneRegion | undefined) {
     defaultCountry: region,
     extract: false,
   });
-}
-
-/** True when both are the same kind of number (mobile, fixed line, ...). */
-function sameType(real: PhoneType | null, candidate: PhoneType | undefined) {
-  if (real === null) return true;
-  if (candidate === undefined) return false;
-  if (real === candidate) return true;
-  const either = new Set<PhoneType>(['FIXED_LINE', 'MOBILE']);
-  return (
-    (real === 'FIXED_LINE_OR_MOBILE' && either.has(candidate)) ||
-    (candidate === 'FIXED_LINE_OR_MOBILE' && either.has(real))
-  );
 }
 
 /** Reserved ranges that can stand in for this number, its area's first. */
@@ -82,19 +76,31 @@ function fill(range: FictionalPhoneRange, rng: Rng, real: string): string {
   return out;
 }
 
-function randomNumber(rng: Rng, real: PhoneNumber): string | null {
+/** True when the number is possible for the calling code but valid nowhere. */
+function isUnallocated(callingCode: string, national: string): boolean {
+  const parsed = parse(`+${callingCode}${national}`, undefined);
+  return parsed !== undefined && parsed.isPossible() && !parsed.isValid();
+}
+
+/**
+ * An unallocated number written like the real one; `fits` checks the
+ * written form (a national number starting with 0, say, can read back as
+ * another number after a trunk prefix).
+ */
+function unallocatedNumber(
+  rng: Rng,
+  real: PhoneNumber,
+  fits: (national: string) => boolean,
+): string | null {
   const national = real.nationalNumber;
   const callingCode = real.countryCallingCode;
-  const type = real.getType() ?? null;
   for (let draw = 0; draw < RANDOM_DRAWS; draw += 1) {
-    const keep = draw < RANDOM_DRAWS / 2 ? 1 : Math.min(3, national.length - 4);
-    const candidate =
-      national.slice(0, keep) + rng.chars(DIGITS, national.length - keep);
-    if (candidate === national || isFictionalPhone(callingCode, candidate)) {
-      continue;
-    }
-    const parsed = parse(`+${callingCode}${candidate}`, undefined);
-    if (parsed?.isValid() && sameType(type, parsed.getType())) {
+    const candidate = rng.chars(DIGITS, national.length);
+    if (
+      candidate !== national &&
+      isUnallocated(callingCode, candidate) &&
+      fits(candidate)
+    ) {
       return candidate;
     }
   }
@@ -153,7 +159,13 @@ export const phoneStandIn: Generator = ({ request, rng, reservedAllowed }) => {
       reserved = true;
     }
   }
-  national ??= randomNumber(rng, real);
+  national ??= unallocatedNumber(rng, real, (candidate) => {
+    const written = render(request.value, real, candidate);
+    return (
+      written !== null &&
+      isWellFormedPhoneStandIn(written, request.value, request.country)
+    );
+  });
   if (national === null || national === real.nationalNumber) return null;
   const value = render(request.value, real, national);
   return value === null ? null : { value, reserved };
@@ -161,8 +173,9 @@ export const phoneStandIn: Generator = ({ request, rng, reservedAllowed }) => {
 
 /**
  * Format check for PHONE stand-ins: a possible number (right length) for the
- * region, with a national number as long as the real one's. Numbers from
- * ranges reserved for fiction pass; libphonenumber may not call them valid.
+ * region, with a national number as long as the real one's, and either from
+ * a range reserved for fiction or valid in no region of its calling code
+ * (unallocated) under the shipped metadata.
  */
 export function isWellFormedPhoneStandIn(
   standIn: string,
@@ -177,7 +190,9 @@ export function isWellFormedPhoneStandIn(
   return (
     candidate.isPossible() &&
     candidate.countryCallingCode === realNumber.countryCallingCode &&
-    candidate.nationalNumber.length === realNumber.nationalNumber.length
+    candidate.nationalNumber.length === realNumber.nationalNumber.length &&
+    (isReservedPhone(standIn, country) ||
+      isUnallocated(candidate.countryCallingCode, candidate.nationalNumber))
   );
 }
 

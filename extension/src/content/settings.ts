@@ -19,9 +19,17 @@ export interface PipelineSettings {
   readonly homeRegions: readonly CountryCode[];
   /** ADDRESS stand-ins keep the city. */
   readonly keepCity: boolean;
+  /** Private and other local IP addresses are masked too. */
+  readonly maskPrivateIps: boolean;
 }
 
-const KEYS = ['entityTypes', 'idPacks', 'homeRegions', 'keepCity'] as const;
+const KEYS = [
+  'entityTypes',
+  'idPacks',
+  'homeRegions',
+  'keepCity',
+  'maskPrivateIps',
+] as const;
 
 export interface SettingsStorageLike {
   get(keys: string[]): Promise<Record<string, unknown>>;
@@ -82,6 +90,10 @@ export function parsePipelineSettings(
       typeof stored.keepCity === 'boolean'
         ? stored.keepCity
         : DEFAULT_SETTINGS.keepCity,
+    maskPrivateIps:
+      typeof stored.maskPrivateIps === 'boolean'
+        ? stored.maskPrivateIps
+        : DEFAULT_SETTINGS.maskPrivateIps,
   };
 }
 

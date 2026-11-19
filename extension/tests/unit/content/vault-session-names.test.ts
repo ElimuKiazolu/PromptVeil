@@ -194,3 +194,33 @@ describe('PERSON mappings in the session', () => {
     }
   });
 });
+
+describe('crypto mappings in the session', () => {
+  it('restore a Base58 address only as written, others in any case', async () => {
+    const { open } = setUp();
+    const session = open();
+    await settle();
+    // Made-up values: the session only looks at their shape.
+    const crypto = (value: string): MaskItem => ({
+      type: 'CRYPTO',
+      subtype: null,
+      country: null,
+      value,
+      normalised: value,
+    });
+    const legacy = `1${'A'.repeat(32)}`;
+    const ethereum = `0x${'ab'.repeat(20)}`;
+    await maskAs(
+      session,
+      [crypto(`1${'B'.repeat(32)}`), crypto(`0x${'cd'.repeat(20)}`)],
+      [legacy, ethereum],
+    );
+    const boundaries = new Map(
+      session.source
+        .mappings()
+        .map((mapping) => [mapping.standIn, mapping.boundary]),
+    );
+    expect(boundaries.get(legacy)).toBe('exact');
+    expect(boundaries.get(ethereum)).toBe('word');
+  });
+});

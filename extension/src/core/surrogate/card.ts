@@ -1,62 +1,36 @@
 /**
- * CARD stand-ins (TR-S2): the same brand and length, Luhn-valid, written
- * with the real value's grouping. The first attempts use published test
- * card numbers of that brand and length (see reserved-values.ts; the
- * detector skips them); after that, or when no test number has the length,
- * a random number with a prefix (IIN) of the brand.
+ * CARD stand-ins (TR-S2): the same brand and length, written with the real
+ * value's grouping, always a payment processor's published test number (see
+ * reserved-values.ts; the detector skips them). Never a random Luhn-valid
+ * number: one could be someone's card, which a chatbot's tools or agent
+ * mode could then use without a click. When every test number of the brand
+ * and length has been tried for a value (the conversation has used them
+ * up), the send is blocked with TestCardsExhaustedError.
  */
-import { luhnCheckDigit } from '../detect/checksum.ts';
-import {
-  CARD_PREFIX_RANGES,
-  cardBrand,
-  normaliseCard,
-} from '../detect/validators/card.ts';
+import { cardBrand, normaliseCard } from '../detect/validators/card.ts';
 import { TEST_CARDS } from '../detect/validators/reserved-values.ts';
 import { applyLayout } from './layout.ts';
-import { DIGITS } from './rng.ts';
 import type { Generator } from './types.ts';
 
-const RANDOM_DRAWS = 64;
+/** Thrown when no published test number of the brand and length is left. */
+export class TestCardsExhaustedError extends Error {
+  constructor() {
+    super('test-cards-exhausted');
+    this.name = 'TestCardsExhaustedError';
+  }
+}
 
-export const cardStandIn: Generator = ({
-  request,
-  rng,
-  base,
-  attempt,
-  reservedAllowed,
-}) => {
+export const cardStandIn: Generator = ({ request, base, attempt }) => {
   const real = normaliseCard(request.value);
   const brand = cardBrand(real);
   if (brand === null) return null;
   const tests = TEST_CARDS[brand].filter(
     (number) => number.length === real.length && number !== real,
   );
-  if (reservedAllowed && attempt < tests.length) {
-    // A different starting point per value, then one number per attempt.
-    const start = base.int(tests.length);
-    const number = tests[(start + attempt) % tests.length];
-    if (number !== undefined) {
-      return { value: applyLayout(request.value, number), reserved: true };
-    }
-  }
-  const ranges = CARD_PREFIX_RANGES.filter(
-    (range) => range.brand === brand && range.lengths.includes(real.length),
-  );
-  if (ranges.length === 0) return null;
-  for (let draw = 0; draw < RANDOM_DRAWS; draw += 1) {
-    const range = rng.pick(ranges);
-    const prefix = rng
-      .between(Number(range.from), Number(range.to))
-      .toString()
-      .padStart(range.from.length, '0');
-    const payload = prefix + rng.chars(DIGITS, real.length - prefix.length - 1);
-    const check = luhnCheckDigit(payload);
-    if (check === null) continue;
-    const number = payload + check.toString();
-    // The longest-prefix rule may give the number another brand.
-    if (number !== real && cardBrand(number) === brand) {
-      return { value: applyLayout(request.value, number), reserved: false };
-    }
-  }
-  return null;
+  if (attempt >= tests.length) throw new TestCardsExhaustedError();
+  // A different starting point per value, then one number per attempt.
+  const number = tests[(base.int(tests.length) + attempt) % tests.length];
+  return number === undefined
+    ? null
+    : { value: applyLayout(request.value, number), reserved: true };
 };

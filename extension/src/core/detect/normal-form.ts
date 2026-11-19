@@ -10,8 +10,10 @@
 import type { CountryCode } from '../../shared/country.ts';
 import type { EntitySubtype, EntityType } from '../../shared/entities.ts';
 import { normaliseCard } from './validators/card.ts';
+import { normaliseCrypto } from './validators/crypto.ts';
 import { normaliseEmail } from './validators/email.ts';
 import { normaliseIban } from './validators/iban.ts';
+import { normaliseIp } from './validators/ip.ts';
 import { normalisePhone } from './validators/phone.ts';
 import { normaliseSecret } from './validators/secret.ts';
 import { TITLES } from '../names/titles.ts';
@@ -69,12 +71,13 @@ export function normaliseReal(
     case 'SECRET':
       return normaliseSecret(value);
     case 'CRYPTO':
-      return value;
+      return normaliseCrypto(value);
     case 'PERSON':
     case 'ORG':
     case 'ADDRESS':
       return normaliseName(value);
     case 'IP':
+      return normaliseIp(value);
     case 'DOB':
     case 'DATE':
     case 'CUSTOM':

@@ -65,6 +65,8 @@ export interface DetectOptions {
   readonly exclude: readonly Span[];
   /** Where long work may yield; blocking when omitted. */
   readonly checkpoint?: Checkpoint;
+  /** Report private and other local IP addresses (settings.maskPrivateIps). */
+  readonly maskPrivateIps?: boolean;
 }
 
 /**
@@ -323,6 +325,7 @@ async function collectCandidates(
         preferredRegions: options.preferredRegions ?? [],
         hasContext,
         checkpoint,
+        maskPrivateIps: options.maskPrivateIps === true,
       });
       if (!verdict.valid) continue;
       candidates.push({
