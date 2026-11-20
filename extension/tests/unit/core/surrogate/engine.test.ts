@@ -29,7 +29,7 @@ import {
   PUBLISHED_TEST_CARD_NUMBERS,
   TEST_CARDS,
 } from '@/src/core/detect/validators/reserved-values.ts';
-import { validateCard } from '@/src/core/detect/validators/card.ts';
+import { cardBrand, validateCard } from '@/src/core/detect/validators/card.ts';
 import { TestCardsExhaustedError } from '@/src/core/surrogate/card.ts';
 import type { StandInRequest } from '@/src/core/surrogate/types.ts';
 import type { CountryCode } from '@/src/shared/country.ts';
@@ -624,7 +624,7 @@ describe('reserved ranges', () => {
     }
   });
 
-  it('blocks once a value has tried every test number of its brand and length', () => {
+  it('blocks a value that has tried every test number of its length (Amex: no other brand has 15 digits)', () => {
     // Braintree's two Amex numbers that verify successfully are left for
     // other values: count what this brand and length has.
     const real = request('CARD', null, null, '3782 822463 10005');
@@ -636,11 +636,40 @@ describe('reserved ranges', () => {
     expect(() => generateStandIn(real, seed(4), count)).toThrow(
       TestCardsExhaustedError,
     );
-    // No published test number of this brand and length: blocked at once.
+  });
+
+  it('borrows a related brand test number of the same length when its own are used up', () => {
+    // Maestro (16 digits): one other Maestro test number, then Mastercard's.
+    const maestro = request('CARD', null, null, '6304 0000 0000 0000');
+    const own = generateStandIn(maestro, seed(5), 0);
+    expect(own?.fallback).toBeUndefined();
+    expect(alphanumerics(own?.value ?? '')).toBe('6759649826438453');
+    const borrowed = generateStandIn(maestro, seed(5), 1);
+    expect(borrowed?.fallback).toBe(true);
+    expect(TEST_CARDS.mastercard).toContain(
+      alphanumerics(borrowed?.value ?? ''),
+    );
+    expect(isWellFormedStandIn(maestro, borrowed?.value ?? '')).toBe(true);
+    expect(shape(borrowed?.value ?? '')).toBe(shape('6304 0000 0000 0000'));
+    // 19 digits: UnionPay's other one, then Discover's, then the rest
+    // (Visa); blocked only when no 19-digit test number is left.
     const unionPay19 = request('CARD', null, null, '6205500000000000004');
-    expect(() => generateStandIn(unionPay19, seed(4), 0)).toThrow(
+    const nineteen = Object.values(TEST_CARDS)
+      .flat()
+      .filter((n) => n.length === 19 && n !== '6205500000000000004');
+    const brands = nineteen.map((_, attempt) => {
+      const standIn = generateStandIn(unionPay19, seed(6), attempt);
+      return validateCard(standIn?.value ?? '').valid
+        ? cardBrandOf(standIn?.value ?? '')
+        : 'invalid';
+    });
+    expect(brands).toEqual(['unionpay', 'discover', 'discover', 'visa']);
+    expect(() => generateStandIn(unionPay19, seed(6), nineteen.length)).toThrow(
       TestCardsExhaustedError,
     );
+    // A well-formed stand-in of another brand must be a test number.
+    expect(isWellFormedStandIn(maestro, '4242 4242 4242 4242')).toBe(true);
+    expect(isWellFormedStandIn(maestro, '4000 0000 0000 0010')).toBe(false);
   });
 
   it('lists only valid cards, each published number once', () => {
@@ -652,10 +681,19 @@ describe('reserved ranges', () => {
     // Kept detectable for the tests: never stand-ins.
     expect(listed).not.toContain('4111111111111111');
     expect(listed).not.toContain('370000000000002');
-    expect(TEST_CARDS.visa.length).toBeGreaterThan(70);
-    expect(TEST_CARDS.mastercard.length).toBeGreaterThan(40);
+    expect(TEST_CARDS.visa.length).toBeGreaterThan(100);
+    expect(TEST_CARDS.mastercard.length).toBeGreaterThan(70);
+    expect(TEST_CARDS.rupay.length).toBeGreaterThanOrEqual(7);
+    expect(TEST_CARDS.maestro.length).toBeGreaterThanOrEqual(2);
+    expect(
+      TEST_CARDS.unionpay.filter((n) => n.length === 19).length,
+    ).toBeGreaterThanOrEqual(2);
   });
 });
+
+function cardBrandOf(value: string): string {
+  return cardBrand(alphanumerics(value)) ?? 'none';
+}
 
 describe('facts encoded in IDs', () => {
   const DAY = 86_400_000;

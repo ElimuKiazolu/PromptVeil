@@ -17,6 +17,8 @@ import { normaliseIp } from './validators/ip.ts';
 import { normalisePhone } from './validators/phone.ts';
 import { normaliseSecret } from './validators/secret.ts';
 import { TITLES } from '../names/titles.ts';
+import { calendarDay, isoDate } from '../dates/calendar.ts';
+import { birthDateBounds, readDate } from '../dates/writing.ts';
 
 /** Upper case without spaces, hyphens, dots and slashes. */
 function compactUpper(value: string): string {
@@ -32,6 +34,23 @@ function normaliseName(value: string): string {
     .toLowerCase();
   const stripped = collapsed.replace(TITLES, '');
   return stripped === '' ? collapsed : stripped;
+}
+
+/**
+ * A date of birth as ISO 8601 (YYYY-MM-DD), so every writing of one date
+ * shares a mapping. Day and month are read as the rule read them (the
+ * detection's country decides an order the numbers leave open).
+ */
+function normaliseBirthDate(
+  country: CountryCode | null,
+  value: string,
+): string {
+  const today = calendarDay(Date.now());
+  const text = value.normalize('NFC').trim();
+  const reading =
+    readDate(text, country, today, birthDateBounds(today)) ??
+    readDate(text, country, today);
+  return reading === null ? text : isoDate(reading.date);
 }
 
 function normaliseBank(subtype: EntitySubtype | null, value: string): string {
@@ -79,6 +98,7 @@ export function normaliseReal(
     case 'IP':
       return normaliseIp(value);
     case 'DOB':
+      return normaliseBirthDate(country, value);
     case 'DATE':
     case 'CUSTOM':
       return value.normalize('NFC').trim();

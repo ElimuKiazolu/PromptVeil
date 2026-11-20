@@ -27,7 +27,7 @@ function fakeRuntime(): DetectionRuntime {
 
 function fakeModule(runtime: DetectionRuntime): DetectionModuleApi {
   return {
-    DETECTION_API_VERSION: 5,
+    DETECTION_API_VERSION: 6,
     createDetection: () => runtime,
   };
 }

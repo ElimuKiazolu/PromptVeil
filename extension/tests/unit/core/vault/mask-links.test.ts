@@ -186,3 +186,46 @@ describe('IP and crypto values in the vault', () => {
     );
   });
 });
+
+describe('dates of birth in the vault', () => {
+  it('stay out of the plaintext in every digit order, with the order stored', async () => {
+    // Fictional date of birth.
+    const DOB = realValue({
+      type: 'DOB',
+      subtype: null,
+      country: 'GB',
+      value: '03/04/1987',
+    });
+    expect(DOB.normalised).toBe('1987-04-03');
+    const context = await readyContext();
+    await prepareMask(context, {
+      conversationId: CONV,
+      site: 'chatgpt',
+      status: 'active',
+      items: [DOB],
+    });
+    await commitMask(context, CONV, [
+      entry(DOB, '18/05/1987', { variants: ['DMY'] }),
+    ]);
+    const dump = await dumpAll(context.db);
+    const forms = [
+      ...needles(DOB),
+      '19870403',
+      '03041987',
+      '04031987',
+      '1987-04-03',
+    ];
+    for (const store of [STORE.mappings, STORE.conversations, STORE.log]) {
+      expect(findPlaintext(dump.get(store), forms)).toEqual([]);
+    }
+    const prepared = await prepareMask(context, {
+      conversationId: CONV,
+      site: 'chatgpt',
+      status: 'active',
+      items: [DOB],
+    });
+    expect(prepared.values).toEqual([
+      { kind: 'existing', standIn: '18/05/1987', variants: ['DMY'] },
+    ]);
+  });
+});

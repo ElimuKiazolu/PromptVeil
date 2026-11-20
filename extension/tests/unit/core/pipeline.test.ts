@@ -16,6 +16,12 @@ import { asEngine } from '../word-lists.ts';
 import { detectEmailsOnly } from '../spike-detect.ts';
 import { detectEmails } from '@/src/core/detect/rules/email.ts';
 
+/** The stand-ins issued, as text. */
+const issueValues = async (
+  ...args: Parameters<typeof issueStandIns>
+): Promise<string[]> =>
+  (await issueStandIns(...args)).map((standIn) => standIn.value);
+
 describe('createPipeline', () => {
   it('replaces an email with a stand-in on example.net', async () => {
     const mask = createMemoryMasker({ detect: detectEmailsOnly }).transform;
@@ -214,7 +220,11 @@ describe('createPipeline', () => {
 
   it('rejects a reply with the wrong number of stand-ins', async () => {
     const mask = (items: readonly MaskItem[]) =>
-      Promise.resolve(items.slice(1).map(() => 'standin.1@example.net'));
+      Promise.resolve(
+        items
+          .slice(1)
+          .map(() => ({ value: 'standin.1@example.net', variants: [] })),
+      );
     const { transform } = createPipeline({
       detect: detectEmailsOnly,
       normalise: (detection) => detection.value,
@@ -260,7 +270,10 @@ function scriptedVault(
       return Promise.resolve({
         values: entries.map((entry): CommittedValue => {
           const kind = answer(entry.standIn, round);
-          return kind === 'taken' ? { kind } : { kind, standIn: entry.standIn };
+          if (kind === 'taken') return { kind };
+          return kind === 'existing'
+            ? { kind, standIn: entry.standIn, variants: [] }
+            : { kind, standIn: entry.standIn };
         }),
         missing: 0,
       });
@@ -276,9 +289,9 @@ const options = (
 describe('issueStandIns', () => {
   it('commits one stand-in per new value and keeps stored ones', async () => {
     const vault = scriptedVault(() => 'inserted');
-    expect(
-      await issueStandIns([item('a'), item('b')], vault, options()),
-    ).toEqual(['standin.1@example.net', 'standin.2@example.net']);
+    expect(await issueValues([item('a'), item('b')], vault, options())).toEqual(
+      ['standin.1@example.net', 'standin.2@example.net'],
+    );
     expect(vault.commits).toHaveLength(1);
   });
 
@@ -289,7 +302,7 @@ describe('issueStandIns', () => {
         taken.has(standIn) ? 'taken' : 'inserted',
       );
       return {
-        standIns: await issueStandIns([item('a')], vault, options()),
+        standIns: await issueValues([item('a')], vault, options()),
         commits: vault.commits,
       };
     };
@@ -317,7 +330,7 @@ describe('issueStandIns', () => {
     };
     const vault = scriptedVault(() => 'inserted');
     expect(
-      await issueStandIns([item('a'), item('b')], vault, options(same)),
+      await issueValues([item('a'), item('b')], vault, options(same)),
     ).toEqual(['standin.0@example.net', 'standin.1@example.net']);
   });
 
@@ -325,7 +338,7 @@ describe('issueStandIns', () => {
     const vault = scriptedVault(() => 'inserted');
     const sometimes: StandInFactory = (request, seed, attempt) =>
       attempt === 0 ? null : numberedStandIns(request, seed, attempt);
-    const result = await issueStandIns(
+    const result = await issueValues(
       [item('a')],
       vault,
       options(
@@ -340,13 +353,13 @@ describe('issueStandIns', () => {
   it(`fails closed after ${MAX_STAND_IN_ATTEMPTS.toString()} attempts`, async () => {
     const vault = scriptedVault(() => 'taken');
     await expect(
-      issueStandIns([item('a')], vault, options()),
+      issueValues([item('a')], vault, options()),
     ).rejects.toBeInstanceOf(StandInsExhaustedError);
     expect(vault.commits).toHaveLength(MAX_STAND_IN_ATTEMPTS);
     // Nothing the prompt accepts: no commit at all.
     const silent = scriptedVault(() => 'inserted');
     await expect(
-      issueStandIns(
+      issueValues(
         [item('a')],
         silent,
         options(numberedStandIns, () => false),
@@ -363,11 +376,12 @@ describe('issueStandIns', () => {
           values: entries.map(() => ({
             kind: 'existing' as const,
             standIn: 'standin.9.abcd@example.net',
+            variants: [],
           })),
           missing: 0,
         }),
     };
-    expect(await issueStandIns([item('a')], vault, options())).toEqual([
+    expect(await issueValues([item('a')], vault, options())).toEqual([
       'standin.9.abcd@example.net',
     ]);
   });

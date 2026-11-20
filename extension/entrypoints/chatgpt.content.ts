@@ -125,10 +125,24 @@ export default defineContentScript({
       entityTypes: () => current.entityTypes,
       checkpoint: () => createCheckpoint(yielder, { signal: ctx.signal }),
       clock: () => performance.now(),
-      report: ({ timings, masked, possible }) => {
+      report: ({
+        timings,
+        masked,
+        possible,
+        ambiguousDates,
+        cardFallbacks,
+      }) => {
         devlog('pipeline.timing', { count: masked, timings });
         // Not masked until the Review panel (P9); counted only.
         if (possible > 0) devlog('pipeline.possible', { count: possible });
+        // Day and month read in the home region's order (counts only).
+        if (ambiguousDates > 0) {
+          devlog('pipeline.ambiguous-dates', { count: ambiguousDates });
+        }
+        // Card stand-ins taken from a related brand's test numbers.
+        if (cardFallbacks > 0) {
+          devlog('pipeline.card-fallback', { count: cardFallbacks });
+        }
       },
     });
     // Message requests sent with fetch: the net asks whether their text

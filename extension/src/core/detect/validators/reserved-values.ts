@@ -32,6 +32,19 @@ import { cardBrand, type CardBrand } from './card.ts';
  *   testing/test-cards
  * - Razorpay, "Test Card Details": razorpay.com/docs/payments/payments/
  *   test-card-details/
+ * Added from these pages (2026-11-20; Adyen's two China UnionPay
+ * ExpressPay numbers and Razorpay's error-scenario cards from the pages
+ * above):
+ * - PayU, "Test Cards, UPI ID, and Wallets": docs.payu.in/docs/
+ *   test-cards-upi-id-and-wallets
+ * - Cashfree Payments, "Sandbox environment": www.cashfree.com/docs/
+ *   payments/online/resources/sandbox-environment
+ * - Juspay, "Test resources": juspay.io/in/docs/resources/docs/
+ *   common-resources/test-resources
+ * - Worldpay, "Testing" (Access card payments): docs.worldpay.com/access/
+ *   products/access/card-payments/testing
+ * Only numbers whose network the page names, that pass the Luhn check, and
+ * that the card rule reads as that brand.
  * Left out: 4111 1111 1111 1111 and 3700 0000 0000 002 (also published,
  * by Braintree and Adyen), which the tests use as real-looking card numbers
  * that must stay detectable; and numbers whose prefix the card rule does
@@ -125,6 +138,8 @@ const PUBLISHED_TEST_CARDS: Readonly<Record<string, readonly string[]>> = {
     '6243030000000001',
     '6250947000000014',
     '6250946000000016',
+    '8171999927660000',
+    '8171999900000000021',
   ],
   braintree: [
     '36259600000004',
@@ -244,6 +259,75 @@ const PUBLISHED_TEST_CARDS: Readonly<Record<string, readonly string[]>> = {
     '6527658900001005',
     '36082800091007',
     '340256000401007',
+    '4100280000090000',
+    '4100280000080001',
+    '4100280000070002',
+    '4100280000060003',
+    '4100280000050004',
+    '4100280000040005',
+    '4100280000030006',
+    '4100280000020007',
+    '4100280000010008',
+    '4100280000000009',
+    '5305620000090007',
+    '5305620000080008',
+    '5305620000070009',
+    '5305620000060000',
+    '5305620000050001',
+    '5305620000040002',
+    '5305620000030003',
+    '5305620000020004',
+    '5305620000010005',
+    '5305620000000006',
+  ],
+  payu: [
+    '5123456789012346',
+    '4012001037141112',
+    '5497774415170603',
+    '6082015309577308',
+    '370295061673669',
+    '5118700000000003',
+    '4594538050639999',
+    '5506900480000008',
+    '4895370077346937',
+    '6071489876543212',
+    '6074829900004938',
+  ],
+  cashfree: [
+    '4706131211212123',
+    '4062288312345026',
+    '4576238912771450',
+    '4466050254381183',
+    '4136880012657791',
+    '4074970084343075',
+    '4770355457382883',
+    '5409162669381034',
+    '5445856839524391',
+    '5176539438527826',
+    '5242535837492075',
+    '5203860658394375',
+    '5552190758372734',
+    '5506908329471983',
+    '6074825972083818',
+    '6074828163369590',
+    '6528591234543575',
+  ],
+  juspay: [
+    '5299920210000277',
+    '5299920000000149',
+    '4591500000000055',
+    '5252521111111117',
+  ],
+  worldpay: [
+    '343434343434343',
+    '6011000400000000',
+    '3528000700000000',
+    '6759649826438453',
+    '2221000000000009',
+    '5163613613613613',
+    '4462030000000000',
+    '4917610000000000003',
+    '4917300800000000',
   ],
 };
 

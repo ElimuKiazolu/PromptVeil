@@ -24,6 +24,7 @@ import {
 } from '../detect/rules/packs/index.ts';
 import { validateCard } from '../detect/validators/card.ts';
 import { validateIban } from '../detect/validators/iban.ts';
+import { isTestCard } from '../detect/validators/reserved-values.ts';
 import type { EntitySubtype, EntityType } from '../../shared/entities.ts';
 import {
   addressLocale,
@@ -32,6 +33,7 @@ import {
 } from './address.ts';
 import { cardStandIn } from './card.ts';
 import { cryptoStandIn, isWellFormedCryptoStandIn } from './crypto.ts';
+import { dobStandIn, isWellFormedDobStandIn } from './dob.ts';
 import {
   emailLocale,
   emailStandIn,
@@ -145,6 +147,8 @@ function generatorFor(request: StandInRequest): Generator {
       return ipStandIn;
     case 'CRYPTO':
       return cryptoStandIn;
+    case 'DOB':
+      return dobStandIn;
     case 'NATIONAL_ID':
       if (request.subtype !== null && SPECS.has(request.subtype)) {
         return nationalIdStandIn;
@@ -176,7 +180,15 @@ export function isWellFormedStandIn(
     case 'CARD': {
       const real = validateCard(request.value);
       const candidate = validateCard(standIn);
-      return real.valid && candidate.valid && candidate.brand === real.brand;
+      // Another brand only as a published test number of the same length
+      // (the fallback when the brand's own are used up).
+      return (
+        real.valid &&
+        candidate.valid &&
+        (candidate.brand === real.brand ||
+          (isTestCard(candidate.digits) &&
+            candidate.digits.length === real.digits.length))
+      );
     }
     case 'BANK': {
       const real = validateIban(request.value);
@@ -191,6 +203,8 @@ export function isWellFormedStandIn(
       return isWellFormedIpStandIn(standIn, request.value);
     case 'CRYPTO':
       return isWellFormedCryptoStandIn(standIn, request.value);
+    case 'DOB':
+      return isWellFormedDobStandIn(standIn, request);
     case 'NATIONAL_ID': {
       const spec =
         request.subtype === null ? undefined : SPECS.get(request.subtype);
@@ -223,18 +237,23 @@ export function generateStandIn(
   });
   if (generated === null || generated.value === request.value) return null;
   if (!isWellFormedStandIn(request, generated.value, env)) return null;
-  const normalised = normaliseReal(
-    request.type,
-    request.subtype,
-    request.country,
-    generated.value,
-  );
+  const normalised =
+    generated.normalised ??
+    normaliseReal(
+      request.type,
+      request.subtype,
+      request.country,
+      generated.value,
+    );
   if (normalised === request.normalised) return null;
   return {
     value: generated.value,
     normalised,
     reserved: generated.reserved,
     locale: generated.locale ?? null,
-    parts: request.type === 'PERSON' ? nameParts(generated.value) : [],
+    parts:
+      generated.parts ??
+      (request.type === 'PERSON' ? nameParts(generated.value) : []),
+    ...(generated.fallback === true ? { fallback: true } : {}),
   };
 }

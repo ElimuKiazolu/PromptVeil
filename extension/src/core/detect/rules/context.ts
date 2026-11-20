@@ -1,7 +1,11 @@
 import type { Span } from '../text.ts';
 import type { ContextWords } from './types.ts';
 
-const ASCII_WORD_CHAR = /^[a-z0-9]$/;
+/**
+ * Letters of the Latin script (accented ones too, so "né" is not found in
+ * "nécessaire") and ASCII digits. Marks such as º are not word characters.
+ */
+const WORD_CHAR = /^(?:[0-9]|(?=\p{Script=Latin})[\p{Ll}\p{Lu}])$/u;
 
 /**
  * The text in a window, lower-cased, with underscores, hyphens, runs of
@@ -17,15 +21,15 @@ function windowText(text: string, from: number, to: number): string {
 }
 
 function isBoundary(char: string): boolean {
-  return char === '' || !ASCII_WORD_CHAR.test(char);
+  return char === '' || !WORD_CHAR.test(char);
 }
 
 /** True when `word` occurs in `haystack` as a whole word (Latin) or anywhere (other scripts). */
 export function containsWord(haystack: string, word: string): boolean {
   const first = word.charAt(0);
   const last = word.charAt(word.length - 1);
-  const checkStart = ASCII_WORD_CHAR.test(first);
-  const checkEnd = ASCII_WORD_CHAR.test(last);
+  const checkStart = WORD_CHAR.test(first);
+  const checkEnd = WORD_CHAR.test(last);
   for (
     let at = haystack.indexOf(word);
     at !== -1;

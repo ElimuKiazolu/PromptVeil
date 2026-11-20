@@ -55,7 +55,15 @@ export interface StandIn {
   readonly reserved: boolean;
   /** The word-list locale it was drawn from, if any. */
   readonly locale: LocaleId | null;
-  /** PERSON: the stand-in's name parts (see nameParts), else empty. */
+  /**
+   * CARD: a published test number of a related brand, the value's own
+   * brand and length being used up in the conversation.
+   */
+  readonly fallback?: boolean;
+  /**
+   * Stored as the mapping's variants: PERSON, the stand-in's name parts (see
+   * nameParts); DOB, its day/month order; else empty.
+   */
   readonly parts: readonly string[];
 }
 
@@ -75,6 +83,15 @@ export interface Generated {
   readonly value: string;
   readonly reserved: boolean;
   readonly locale?: LocaleId;
+  /**
+   * The stand-in's normal form, when the generator knows it better than the
+   * real value's rules would read it (a date read in the real date's order).
+   */
+  readonly normalised?: string;
+  /** Stand-in-side facts stored with it (DOB: its day/month order). */
+  readonly parts?: readonly string[];
+  /** Borrowed from a related format, the value's own being used up. */
+  readonly fallback?: boolean;
 }
 
 /** A stand-in for the request, or null when this attempt has none. */

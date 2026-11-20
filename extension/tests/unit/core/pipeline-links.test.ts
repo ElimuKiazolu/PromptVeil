@@ -11,6 +11,12 @@ import type { Detection } from '@/src/shared/entities.ts';
 import type { MaskItem } from '@/src/shared/vault-protocol.ts';
 import { testEngine } from '../word-lists.ts';
 
+/** The stand-ins issued, as text. */
+const issueValues = async (
+  ...args: Parameters<typeof issueStandIns>
+): Promise<string[]> =>
+  (await issueStandIns(...args)).map((standIn) => standIn.value);
+
 // Names and addresses: the fixture identities' and made-up ones.
 const item = (type: MaskItem['type'], value: string): MaskItem => ({
   type,
@@ -75,7 +81,7 @@ describe('linked values in one send', () => {
       'Harriet Pemberton, harriet.pemberton@example.org, info@acme.example';
     const view = promptView(text, [], items);
     const vault = recordingVault();
-    const standIns = await issueStandIns(items, vault, {
+    const standIns = await issueValues(items, vault, {
       standIn: engine.standIn,
       relations: issueRelations(items, [], view),
       fits: (masked, standIn) => fitsPrompt(view, masked.type, standIn),
@@ -119,7 +125,7 @@ describe('linked values in one send', () => {
     ];
     const view = promptView('', [], items, issued);
     const vault = recordingVault();
-    const standIns = await issueStandIns(items, vault, {
+    const standIns = await issueValues(items, vault, {
       standIn: engine.standIn,
       relations: issueRelations(items, issued, view),
       fits: () => true,
@@ -176,7 +182,7 @@ describe('name parts and TR-S3', () => {
       item('PERSON', 'Harriet Hale'),
     ];
     const view = promptView('', [], items);
-    const standIns = await issueStandIns(items, recordingVault(), {
+    const standIns = await issueValues(items, recordingVault(), {
       standIn: engine.standIn,
       relations: issueRelations(items, [], view),
       fits: (masked, value) => fitsPrompt(view, masked.type, value),

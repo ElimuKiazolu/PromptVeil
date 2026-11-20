@@ -24,9 +24,22 @@
  * send or the conversation is built from that person's stand-in (persons
  * are issued first), and every address at one real domain gets the same
  * stand-in domain.
+ *
+ * Dates of birth: every writing of one date shares a mapping (the normal
+ * form is the date), and each occurrence gets the stand-in date written
+ * the way that occurrence is written (read in the stand-in's stored order).
  */
 import type { Detection, EntityType } from '../shared/entities.ts';
 import type { MaskItem } from '../shared/vault-protocol.ts';
+import { calendarDay } from './dates/calendar.ts';
+import {
+  birthDateBounds,
+  isDateOrder,
+  parseDateWriting,
+  readAs,
+  readDate,
+  writeAs,
+} from './dates/writing.ts';
 import type { Checkpoint } from './detect/schedule.ts';
 import { isSpikeStandIn } from './spike-standin.ts';
 import { emailDomain, emailMatchesPerson } from './names/email-links.ts';
@@ -43,6 +56,7 @@ export const MAX_STAND_IN_ATTEMPTS = 20;
 
 /** Types with stand-in generators: the types masked live. */
 export const MASKABLE_TYPES: ReadonlySet<EntityType> = new Set<EntityType>([
+  'DOB',
   'EMAIL',
   'PHONE',
   'CARD',
@@ -54,14 +68,15 @@ export const MASKABLE_TYPES: ReadonlySet<EntityType> = new Set<EntityType>([
 ]);
 
 export type PreparedValue =
-  | { kind: 'existing'; standIn: string }
+  /** Stored: its stand-in and stand-in-side variants (a DOB's order). */
+  | { kind: 'existing'; standIn: string; variants: readonly string[] }
   | { kind: 'new'; seed: Uint8Array; number: number };
 
 export interface CommitEntry {
   item: MaskItem;
   standIn: string;
   standInNormalised: string;
-  /** PERSON: the stand-in's name parts (stored as its variants). */
+  /** PERSON: the stand-in's name parts; DOB: its order (stored as variants). */
   variants: readonly string[];
   /** The word-list locale the stand-in came from. */
   locale: string | null;
@@ -70,7 +85,15 @@ export interface CommitEntry {
 }
 
 export type CommittedValue =
-  { kind: 'inserted' | 'existing'; standIn: string } | { kind: 'taken' };
+  | { kind: 'inserted'; standIn: string }
+  | { kind: 'existing'; standIn: string; variants: readonly string[] }
+  | { kind: 'taken' };
+
+/** A value's stand-in as issued, with its stand-in-side variants. */
+export interface IssuedStandIn {
+  readonly value: string;
+  readonly variants: readonly string[];
+}
 
 /** The current conversation's vault, for one masking. */
 export interface IssueVault {
@@ -148,6 +171,16 @@ export interface PipelineReport {
   masked: number;
   /** "Possible" detections of masked types, left as they are. */
   possible: number;
+  /**
+   * Dates of birth masked whose numbers allowed two dates, read in the home
+   * region's order.
+   */
+  ambiguousDates: number;
+  /**
+   * Card stand-ins borrowed from a related brand (the value's own brand and
+   * length used up in the conversation).
+   */
+  cardFallbacks: number;
 }
 
 /**
@@ -297,6 +330,8 @@ export interface IssueOptions {
   clock?: () => number;
   /** Receives the time spent in each step (added up over rounds). */
   timings?: Pick<PipelineTimings, 'prepare' | 'generate' | 'commit'>;
+  /** Counts stand-ins committed that were borrowed (card fallbacks). */
+  counts?: { fallbacks: number };
 }
 
 /**
@@ -309,7 +344,7 @@ export async function issueStandIns(
   items: readonly MaskItem[],
   vault: IssueVault,
   options: IssueOptions,
-): Promise<string[]> {
+): Promise<IssuedStandIn[]> {
   const clock = options.clock ?? (() => 0);
   const timings = options.timings ?? { prepare: 0, generate: 0, commit: 0 };
   const relations = options.relations ?? NO_RELATIONS;
@@ -319,14 +354,14 @@ export async function issueStandIns(
   if (prepared.values.length !== items.length) {
     throw new RangeError('one prepared value per item expected');
   }
-  const standIns: (string | undefined)[] = [];
+  const standIns: (IssuedStandIn | undefined)[] = [];
   const stages = new Map<number, Pending[]>();
   let reused: MaskItem[] = [];
   for (const [index, value] of prepared.values.entries()) {
     const item = items[index];
     if (item === undefined) throw new RangeError('missing item');
     if (value.kind === 'existing') {
-      standIns[index] = value.standIn;
+      standIns[index] = { value: value.standIn, variants: value.variants };
       reused.push(item);
       relations.issued(item, value.standIn);
     } else {
@@ -358,11 +393,13 @@ export async function issueStandIns(
     while (pending.length > 0 || first) {
       const chosen = new Set(
         standIns.flatMap((standIn) =>
-          standIn === undefined ? [] : [compact(standIn)],
+          standIn === undefined ? [] : [compact(standIn.value)],
         ),
       );
       if (pending.length > 0) await options.load?.(pending.map(requestOf));
       const entries: CommitEntry[] = [];
+      /** Per entry: a card number borrowed from a related brand. */
+      const borrowed: boolean[] = [];
       for (const entry of pending) {
         const waiting = options.checkpoint?.();
         if (waiting !== undefined) await waiting;
@@ -381,6 +418,7 @@ export async function issueStandIns(
           ) {
             chosen.add(compact(standIn.value));
             relations.chosen(entry.item, standIn);
+            borrowed.push(standIn.fallback === true);
             entries.push({
               item: entry.item,
               standIn: standIn.value,
@@ -415,7 +453,16 @@ export async function issueStandIns(
           entry.attempt += 1;
           next.push(entry);
         } else {
-          standIns[entry.index] = result.standIn;
+          if (result.kind === 'inserted' && borrowed[position] === true) {
+            if (options.counts !== undefined) options.counts.fallbacks += 1;
+          }
+          standIns[entry.index] = {
+            value: result.standIn,
+            variants:
+              result.kind === 'existing'
+                ? result.variants
+                : (entries[position]?.variants ?? []),
+          };
           relations.issued(entry.item, result.standIn);
         }
       }
@@ -472,6 +519,7 @@ export function issueRelations(
         const real = emailDomain(item.value);
         if (!domains.has(real)) domains.set(real, emailDomain(standIn.value));
       }
+      if (item.type !== 'PERSON') return;
       for (const part of standIn.parts) view.nameParts.add(part.toLowerCase());
     },
     issued: (item, standIn) => {
@@ -499,8 +547,8 @@ export interface PipelineOptions {
    */
   mask: (
     items: readonly MaskItem[],
-    issue: (vault: IssueVault) => Promise<string[]>,
-  ) => Promise<readonly string[]>;
+    issue: (vault: IssueVault) => Promise<IssuedStandIn[]>,
+  ) => Promise<readonly IssuedStandIn[]>;
   /** True for a stand-in already issued in the current conversation. */
   isIssued: (value: string) => boolean;
   /** The current conversation's issued values (links, TR-S3 name parts). */
@@ -537,6 +585,44 @@ function itemKey(item: MaskItem): string {
   return JSON.stringify([item.type, item.subtype, item.normalised]);
 }
 
+/**
+ * The text that replaces one occurrence: the stand-in, and for a date of
+ * birth the stand-in date written the way this occurrence is written (the
+ * stand-in as issued when either cannot be read).
+ */
+function replacementFor(
+  detection: Detection,
+  standIn: IssuedStandIn,
+  now: number,
+): string {
+  if (detection.type !== 'DOB') return standIn.value;
+  const today = calendarDay(now);
+  const [order] = standIn.variants;
+  const writing = parseDateWriting(standIn.value);
+  const date =
+    isDateOrder(order) && writing !== null
+      ? readAs(writing, order, today)
+      : null;
+  const here = readDate(
+    detection.value,
+    detection.country,
+    today,
+    birthDateBounds(today),
+  );
+  if (date === null || here === null) return standIn.value;
+  return writeAs(here.writing, here.order, date) ?? standIn.value;
+}
+
+/** A date of birth whose numbers allowed two dates. */
+function isAmbiguousDate(detection: Detection, now: number): boolean {
+  if (detection.type !== 'DOB') return false;
+  const today = calendarDay(now);
+  return (
+    readDate(detection.value, detection.country, today, birthDateBounds(today))
+      ?.ambiguous === true
+  );
+}
+
 export function createPipeline(options: PipelineOptions): Pipeline {
   const { detect, normalise, isIssued } = options;
   const clock = options.clock ?? (() => 0);
@@ -549,6 +635,7 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     const spans: { detection: Detection; key: string }[] = [];
     const items = new Map<string, MaskItem>();
     let possible = 0;
+    let ambiguousDates = 0;
     for (const detection of detections) {
       if (types.has(detection.type) && detection.status === 'possible') {
         possible += 1;
@@ -562,11 +649,12 @@ export function createPipeline(options: PipelineOptions): Pipeline {
         normalised: await normalise(detection),
       };
       const key = itemKey(item);
+      if (isAmbiguousDate(detection, now())) ambiguousDates += 1;
       // Each value goes to the vault once, however often it appears.
       if (!items.has(key)) items.set(key, item);
       spans.push({ detection, key });
     }
-    return { spans, items, possible };
+    return { spans, items, possible, ambiguousDates };
   };
 
   const prepare = async (text: string): Promise<void> => {
@@ -582,7 +670,8 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     const started = clock();
     const detections = await detect(text);
     const rules = clock() - started;
-    const { spans, items, possible } = await collect(detections);
+    const { spans, items, possible, ambiguousDates } =
+      await collect(detections);
     const timings: PipelineTimings = {
       rules,
       prepare: 0,
@@ -592,7 +681,13 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     };
     if (spans.length === 0) {
       timings.total = clock() - started;
-      options.report?.({ timings, masked: 0, possible });
+      options.report?.({
+        timings,
+        masked: 0,
+        possible,
+        ambiguousDates,
+        cardFallbacks: 0,
+      });
       return text;
     }
 
@@ -601,6 +696,8 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     const issued = options.issued?.() ?? [];
     const view = promptView(text, detections, uniqueItems, issued);
     const engine = await options.engine();
+    const masked = now();
+    const counts = { fallbacks: 0 };
     const standIns = await options.mask(uniqueItems, (vault) =>
       issueStandIns(uniqueItems, vault, {
         standIn: engine.standIn,
@@ -610,10 +707,11 @@ export function createPipeline(options: PipelineOptions): Pipeline {
         // costs no commit round trip (the vault checks it again).
         fits: (item, standIn) =>
           !isIssued(standIn.value) && fitsPrompt(view, item.type, standIn),
-        now: now(),
+        now: masked,
         checkpoint: options.checkpoint?.(),
         clock,
         timings,
+        counts,
       }),
     );
     if (standIns.length !== unique.length) {
@@ -629,11 +727,19 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     for (const { detection, key } of spans) {
       const standIn = byKey.get(key);
       if (standIn === undefined) throw new RangeError('missing stand-in');
-      out += text.slice(cursor, detection.start) + standIn;
+      out +=
+        text.slice(cursor, detection.start) +
+        replacementFor(detection, standIn, masked);
       cursor = detection.end;
     }
     timings.total = clock() - started;
-    options.report?.({ timings, masked: unique.length, possible });
+    options.report?.({
+      timings,
+      masked: unique.length,
+      possible,
+      ambiguousDates,
+      cardFallbacks: counts.fallbacks,
+    });
     return out + text.slice(cursor);
   };
 

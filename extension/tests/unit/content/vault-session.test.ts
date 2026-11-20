@@ -135,14 +135,16 @@ function openSession(
 }
 
 /** Masks as the content script does, with the stand-in engine. */
-const maskIn = (session: VaultSession, items: MaskItem[]) =>
-  session.mask(items, (vault) =>
-    issueStandIns(items, vault, {
-      standIn: testEngine().standIn,
-      fits: () => true,
-      now: Date.now(),
-    }),
-  );
+const maskIn = async (session: VaultSession, items: MaskItem[]) =>
+  (
+    await session.mask(items, (vault) =>
+      issueStandIns(items, vault, {
+        standIn: testEngine().standIn,
+        fits: () => true,
+        now: Date.now(),
+      }),
+    )
+  ).map((standIn) => standIn.value);
 
 const realValues = (session: VaultSession) =>
   session.source

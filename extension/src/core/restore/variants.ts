@@ -1,7 +1,8 @@
 /**
  * Stand-ins a reply wrote in another form than the one sent (TR-X2):
  * number-like values with other separators, spacing or case, phone numbers
- * with another prefix or grouping, and card last-four mentions.
+ * with another prefix or grouping, card last-four mentions, and dates of
+ * birth in another date format.
  *
  * Every variant needs at least MIN_FORM_LENGTH letters or digits (so at
  * least six digits for a number made of digits only) and clean boundaries:
@@ -9,6 +10,21 @@
  * separator and a digit (part of a longer number).
  */
 import type { EntityType } from '../../shared/entities.ts';
+import {
+  calendarDay,
+  isoDate,
+  parseIsoDate,
+  type CalendarDate,
+} from '../dates/calendar.ts';
+import {
+  findDateSpans,
+  isDateOrder,
+  parseDateWriting,
+  readAs,
+  writeAs,
+  type DateOrder,
+  type DateWriting,
+} from '../dates/writing.ts';
 import { CALLING_CODES } from '../net/calling-codes.ts';
 import { compactForm, MIN_FORM_LENGTH } from '../net/compact.ts';
 import { INTERNATIONAL_PREFIXES, nationalPrefix } from './phone-prefixes.ts';
@@ -33,14 +49,19 @@ export interface VariantFinder {
   count(text: string): number;
 }
 
-/** The variants of a stand-in of this type, if it has any. */
+/**
+ * The variants of a stand-in of this type, if it has any. `stored`: the
+ * stand-in-side facts stored with the mapping (a DOB's day/month order).
+ */
 export function variantsFor(
   type: EntityType,
   standIn: string,
   normalised: string,
+  stored: readonly string[] = [],
 ): StandInVariants | undefined {
   // Variant patterns also match the stand-in as shown, so only stand-ins
   // they can spell get variants (the leak check counts through them).
+  if (type === 'DOB') return dateVariants(standIn, normalised, stored);
   if (type === 'PHONE') {
     return SPELLED_PHONE.test(standIn)
       ? phoneVariants(standIn, normalised)
@@ -78,6 +99,60 @@ function phoneVariants(
     standInNumber: shown.slice(shown.length - realNumber.length),
     realNumber,
   };
+}
+
+/**
+ * A date-of-birth stand-in is read in its stored order; the real date is
+ * its normal form (ISO 8601).
+ */
+function dateVariants(
+  standIn: string,
+  normalised: string,
+  stored: readonly string[],
+): StandInVariants | undefined {
+  const [order] = stored;
+  const writing = parseDateWriting(standIn);
+  const realDate = parseIsoDate(normalised);
+  if (!isDateOrder(order) || writing === null || realDate === null) {
+    return undefined;
+  }
+  const standInDate = readAs(writing, order, calendarDay(Date.now()));
+  if (standInDate === null) return undefined;
+  return {
+    kind: 'date',
+    order,
+    standInDate: isoDate(standInDate),
+    realDate: isoDate(realDate),
+  };
+}
+
+interface DateEntry {
+  readonly order: DateOrder;
+  readonly real: CalendarDate;
+}
+
+/**
+ * The stand-in a written date stands for, and the order it was read in. A
+ * date whose numbers allow two different dates counts only in the order of
+ * the stand-in it would match.
+ */
+function matchDate(
+  writing: DateWriting,
+  dates: ReadonlyMap<string, readonly DateEntry[]>,
+  today: CalendarDate,
+): { order: DateOrder; entry: DateEntry } | null {
+  const readings = writing.orders.flatMap((order) => {
+    const date = readAs(writing, order, today);
+    return date === null ? [] : [{ order, iso: isoDate(date) }];
+  });
+  const clear = new Set(readings.map((reading) => reading.iso)).size === 1;
+  for (const { order, iso } of readings) {
+    const entry = dates
+      .get(iso)
+      ?.find((candidate) => clear || candidate.order === order);
+    if (entry !== undefined) return { order, entry };
+  }
+  return null;
 }
 
 /** Separators allowed between the characters of a number-like value. */
@@ -293,6 +368,8 @@ export function createVariantFinder(
   const phones = new Map<string, PhoneEntry[]>();
   /** Card stand-ins by their last four digits. */
   const lastFour = new Map<string, StandInMapping[]>();
+  /** Date-of-birth stand-ins by their date (ISO 8601). */
+  const dates = new Map<string, DateEntry[]>();
   for (const mapping of mappings) {
     const { variants } = mapping;
     if (variants?.kind === 'layout') {
@@ -313,9 +390,19 @@ export function createVariantFinder(
         realNumber: variants.realNumber,
       };
       phones.set(key, [...(phones.get(key) ?? []), entry]);
+    } else if (variants?.kind === 'date') {
+      const real = parseIsoDate(variants.realDate);
+      if (real === null) continue;
+      const key = variants.standInDate;
+      dates.set(key, [
+        ...(dates.get(key) ?? []),
+        { order: variants.order, real },
+      ]);
     }
   }
-  if (layouts.size === 0 && phones.size === 0) return NO_VARIANTS;
+  if (layouts.size === 0 && phones.size === 0 && dates.size === 0) {
+    return NO_VARIANTS;
+  }
   // Keys are at least MIN_FORM_LENGTH long, so longer than HEAD.
   const layoutKeys = keySet(layouts);
   const phoneKeys = keySet(phones);
@@ -385,6 +472,23 @@ export function createVariantFinder(
     }
   };
 
+  /** Dates standing for a date-of-birth stand-in, in any written format. */
+  const findDates = (text: string, out: VariantMatch[]): void => {
+    if (dates.size === 0) return;
+    // Two-digit years are read as not in the future.
+    const today = calendarDay(Date.now());
+    for (const span of findDateSpans(text)) {
+      const writing = parseDateWriting(text.slice(span.start, span.end));
+      if (writing === null) continue;
+      const found = matchDate(writing, dates, today);
+      if (found === null) continue;
+      const real =
+        writeAs(writing, found.order, found.entry.real) ??
+        isoDate(found.entry.real);
+      out.push({ start: span.start, end: span.end, real });
+    }
+  };
+
   /** Keys anywhere in the runs, glued or not; each character counts once. */
   const countIn = (runs: readonly Run[], keys: KeySet): number => {
     let total = 0;
@@ -409,6 +513,7 @@ export function createVariantFinder(
       const out: VariantMatch[] = [];
       findLayouts(text, out);
       findPhones(text, out);
+      findDates(text, out);
       return out.sort((a, b) => a.start - b.start || b.end - a.end);
     },
 
@@ -443,9 +548,12 @@ export function createVariantFinder(
     },
 
     count(text) {
+      const dateMatches: VariantMatch[] = [];
+      findDates(text, dateMatches);
       return (
         (layouts.size === 0 ? 0 : countIn(runsOf(text, false), layoutKeys)) +
-        (phones.size === 0 ? 0 : countIn(runsOf(text, true), phoneKeys))
+        (phones.size === 0 ? 0 : countIn(runsOf(text, true), phoneKeys)) +
+        dateMatches.length
       );
     },
   };

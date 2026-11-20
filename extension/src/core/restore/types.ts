@@ -1,3 +1,5 @@
+import type { DateOrder } from '../dates/writing.ts';
+
 /**
  * How a stand-in must be delimited in text for a match to count.
  * - 'email': not glued to further local-part or domain characters, so
@@ -38,6 +40,10 @@ export interface StandInMapping {
  * - 'phone': the national significant number with any national or
  *   international prefix (or none) and any grouping; the real number comes
  *   back with the prefix and grouping the reply used.
+ * - 'date' (dates of birth): the stand-in date written in any supported
+ *   format; a numeric date is read in the stand-in's order unless its
+ *   numbers allow only one date. The real date comes back written the way
+ *   the reply wrote it.
  */
 export type StandInVariants =
   | { readonly kind: 'layout'; readonly card: boolean }
@@ -47,6 +53,13 @@ export type StandInVariants =
       /** National significant numbers, digits only, of equal length. */
       readonly standInNumber: string;
       readonly realNumber: string;
+    }
+  | {
+      readonly kind: 'date';
+      readonly order: DateOrder;
+      /** ISO 8601 dates. */
+      readonly standInDate: string;
+      readonly realDate: string;
     };
 
 /**

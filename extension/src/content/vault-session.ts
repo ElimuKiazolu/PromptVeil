@@ -27,15 +27,18 @@ import { nameParts } from '@/src/core/names/parts.ts';
 import {
   StaleStandInsError,
   type CommittedValue,
+  type IssuedStandIn,
   type IssuedValue,
   type IssueVault,
   type PreparedValue,
 } from '@/src/core/pipeline.ts';
 import {
+  createVariantFinder,
   variantsFor,
   type BoundaryRule,
   type StandInMapping,
   type StandInSource,
+  type VariantFinder,
 } from '@/src/core/restore/index.ts';
 import { netForms } from '@/src/core/net/forms.ts';
 import {
@@ -110,15 +113,18 @@ export interface VaultSession {
    */
   mask(
     items: readonly MaskItem[],
-    issue: (vault: IssueVault) => Promise<string[]>,
-  ): Promise<string[]>;
+    issue: (vault: IssueVault) => Promise<IssuedStandIn[]>,
+  ): Promise<IssuedStandIn[]>;
   /**
    * Looks the items up in the current conversation without storing
    * anything, so a later mask can skip that step. Values already looked up
    * are not asked for again.
    */
   peek(items: readonly MaskItem[]): Promise<void>;
-  /** True for a stand-in of the current conversation. */
+  /**
+   * True for a stand-in of the current conversation (a date-of-birth
+   * stand-in in any written format).
+   */
   isIssued(value: string): boolean;
   /** The current conversation's values and stand-ins (memory only). */
   issued(): readonly IssuedValue[];
@@ -314,6 +320,23 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     return run;
   };
 
+  /** Date-of-birth stand-ins by date, rebuilt when the mappings change. */
+  let dates: { version: number; finder: VariantFinder } | null = null;
+  /** True for a date-of-birth stand-in written in another format. */
+  const isIssuedDate = (value: string): boolean => {
+    if (dates?.version !== version) {
+      dates = {
+        version,
+        finder: createVariantFinder(
+          mappings.filter((mapping) => mapping.variants?.kind === 'date'),
+        ),
+      };
+    }
+    return dates.finder
+      .find(value)
+      .some((match) => match.start === 0 && match.end === value.length);
+  };
+
   const publish = (): void => {
     const whole = [...byStandIn.values()];
     const wholeKeys = new Set(byStandIn.keys());
@@ -348,7 +371,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
         real,
         boundary: boundaryFor(type, standIn),
         netForms: netForms(type, real, normalised),
-        variants: variantsFor(type, standIn, normalised),
+        variants: variantsFor(type, standIn, normalised, parts),
       },
     });
     return true;
@@ -564,6 +587,8 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
             cache.values.set(itemKey(entry.item), {
               kind: 'existing',
               standIn: value.standIn,
+              variants:
+                value.kind === 'existing' ? value.variants : entry.variants,
             });
           }
         }
@@ -574,8 +599,8 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
 
   const mask = (
     items: readonly MaskItem[],
-    issue: (vault: IssueVault) => Promise<string[]>,
-  ): Promise<string[]> => {
+    issue: (vault: IssueVault) => Promise<IssuedStandIn[]>,
+  ): Promise<IssuedStandIn[]> => {
     // A Send right after a navigation must not mask into the old chat.
     checkConversation();
     const target = conversation;
@@ -586,7 +611,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       // or while masking: these stand-ins would belong to the old one.
       if (masking !== generation) return fail('prompt-changed');
       if (migration !== null && migration.to === target.id) await migrate();
-      let standIns: string[];
+      let standIns: IssuedStandIn[];
       try {
         standIns = await issue(vaultFor(target, masking));
       } catch (error) {
@@ -605,11 +630,13 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
         if (
           item !== undefined &&
           add(
-            standIn,
+            standIn.value,
             item.value,
             item.type,
             item.normalised,
-            item.type === 'PERSON' ? nameParts(standIn) : [],
+            item.type === 'PERSON'
+              ? nameParts(standIn.value)
+              : standIn.variants,
           )
         ) {
           added = true;
@@ -703,7 +730,8 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
     checkConversation,
     mask,
     peek,
-    isIssued: (value) => byStandIn.has(value.toLowerCase()),
+    isIssued: (value) =>
+      byStandIn.has(value.toLowerCase()) || isIssuedDate(value),
     issued: () => [...byStandIn.values()],
     handleNotice,
     clear: () => {

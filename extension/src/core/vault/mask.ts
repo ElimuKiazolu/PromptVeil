@@ -49,7 +49,8 @@ export interface PrepareRequest {
 }
 
 export type PreparedValue =
-  | { kind: 'existing'; standIn: string }
+  /** Stored: its stand-in and stand-in-side variants (a DOB's order). */
+  | { kind: 'existing'; standIn: string; variants: string[] }
   | {
       kind: 'new';
       /** 32 bytes; the stand-in engine's seed for this value. */
@@ -129,7 +130,11 @@ async function lookUp(
     const seed = seeds[index];
     if (seed === undefined) throw new RangeError('missing seed');
     if (mapping !== null) {
-      values.push({ kind: 'existing', standIn: mapping.surrogate });
+      values.push({
+        kind: 'existing',
+        standIn: mapping.surrogate,
+        variants: [...mapping.variants],
+      });
       continue;
     }
     count += 1;
@@ -185,8 +190,10 @@ export interface CommitEntry {
 }
 
 export type CommittedValue =
-  /** Stored now, or already stored by another tab: send this stand-in. */
-  | { kind: 'inserted' | 'existing'; standIn: string }
+  /** Stored now: send this stand-in. */
+  | { kind: 'inserted'; standIn: string }
+  /** Already stored by another tab: send this stand-in. */
+  | { kind: 'existing'; standIn: string; variants: string[] }
   /** Used for another value or equal to a real value: try another. */
   | { kind: 'taken' };
 
@@ -304,7 +311,11 @@ export async function commitMask(
         // Stored meanwhile (another tab, or earlier in this request).
         const existing = await reuse(mapping.realHash);
         if (existing !== null) {
-          values.push({ kind: 'existing', standIn: existing.surrogate });
+          values.push({
+            kind: 'existing',
+            standIn: existing.surrogate,
+            variants: [...existing.variants],
+          });
           continue;
         }
         const usedForAnother = await requestResult(

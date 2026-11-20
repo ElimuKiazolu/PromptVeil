@@ -1,5 +1,6 @@
 export { createRestoreMatcher } from './matcher.ts';
-export { variantsFor } from './variants.ts';
+export { createVariantFinder, variantsFor } from './variants.ts';
+export type { VariantFinder } from './variants.ts';
 export type {
   BoundaryRule,
   Replacement,

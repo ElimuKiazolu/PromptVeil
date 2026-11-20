@@ -11,7 +11,7 @@ import {
   type VaultService,
 } from '@/src/core/vault/service.ts';
 import { nameParts } from '@/src/core/names/parts.ts';
-import { issueStandIns } from '@/src/core/pipeline.ts';
+import { issueStandIns, type IssuedStandIn } from '@/src/core/pipeline.ts';
 import { createRestoreMatcher } from '@/src/core/restore/index.ts';
 import { createMessenger, PROTOCOL } from '@/src/shared/messaging.ts';
 import type { CommitRequest, MaskItem } from '@/src/shared/vault-protocol.ts';
@@ -84,7 +84,7 @@ function maskAs(
   session: VaultSession,
   items: MaskItem[],
   standIns: string[],
-): Promise<string[]> {
+): Promise<IssuedStandIn[]> {
   return session.mask(items, (vault) =>
     issueStandIns(items, vault, {
       standIn: (request) => {
@@ -222,5 +222,56 @@ describe('crypto mappings in the session', () => {
     );
     expect(boundaries.get(legacy)).toBe('exact');
     expect(boundaries.get(ethereum)).toBe('word');
+  });
+});
+
+describe('DOB mappings in the session', () => {
+  const dob: MaskItem = {
+    type: 'DOB',
+    subtype: null,
+    country: null,
+    value: '12/03/1990',
+    normalised: '1990-03-12',
+  };
+  const maskDob = (session: VaultSession) =>
+    session.mask([dob], (vault) =>
+      issueStandIns([dob], vault, {
+        standIn: () => ({
+          value: '26/04/1990',
+          normalised: '1990-04-26',
+          reserved: false,
+          locale: null,
+          parts: ['DMY'],
+        }),
+        fits: () => true,
+        now: 0,
+      }),
+    );
+
+  it('store the order, count the stand-in date in any format as issued, and restore it after a reload', async () => {
+    const { open, sent } = setUp();
+    const session = open();
+    await settle();
+    expect(await maskDob(session)).toEqual([
+      { value: '26/04/1990', variants: ['DMY'] },
+    ]);
+    expect(sent[0]?.map((entry) => entry.variants)).toEqual([['DMY']]);
+    expect(session.isIssued('26/04/1990')).toBe(true);
+    expect(session.isIssued('26 April 1990')).toBe(true);
+    expect(session.isIssued('1990-04-26')).toBe(true);
+    expect(session.isIssued('27 April 1990')).toBe(false);
+    expect(session.isIssued('12/03/1990')).toBe(false);
+    // Stored: the vault hands back the order with the stand-in.
+    expect(await maskDob(session)).toEqual([
+      { value: '26/04/1990', variants: ['DMY'] },
+    ]);
+    const reloaded = open();
+    for (let i = 0; i < 200 && reloaded.state().status !== 'ready'; i += 1) {
+      await settle();
+    }
+    expect(reloaded.state().status).toBe('ready');
+    const matcher = createRestoreMatcher(reloaded.source.mappings());
+    const [found] = matcher.find('Born April 26, 1990.');
+    expect(found?.real).toBe('March 12, 1990');
   });
 });

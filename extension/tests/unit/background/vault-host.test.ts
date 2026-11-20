@@ -317,7 +317,7 @@ describe('vault requests', () => {
       value: {
         status: 'ok',
         dateOffsetDays: prepared.value.dateOffsetDays,
-        items: [{ kind: 'existing', standIn }],
+        items: [{ kind: 'existing', standIn, variants: [] }],
       },
     });
     // A stand-in used for one value is taken for another.

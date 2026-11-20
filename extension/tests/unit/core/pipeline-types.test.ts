@@ -10,6 +10,8 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
 import { SECRET_TOKENS } from './detect/rules/secret-tokens.ts';
+import { calendarDay, isoDate } from '@/src/core/dates/calendar.ts';
+import { findDateSpans, readDate } from '@/src/core/dates/writing.ts';
 import { normaliseReal } from '@/src/core/detect/normal-form.ts';
 import { detectRules } from '@/src/core/detect/rules/detector.ts';
 import { COUNTRY_PACKS } from '@/src/core/detect/rules/packs/index.ts';
@@ -27,9 +29,18 @@ import {
 import { testEngine } from '../word-lists.ts';
 import type { Detection, EntityType } from '@/src/shared/entities.ts';
 
+/** The stand-ins issued, as text. */
+const issueValues = async (
+  ...args: Parameters<typeof issueStandIns>
+): Promise<string[]> =>
+  (await issueStandIns(...args)).map((standIn) => standIn.value);
+
 /** One seed per value; stand-ins stored on commit. */
 function memoryVault() {
-  const stored = new Map<string, string>();
+  const stored = new Map<
+    string,
+    { standIn: string; variants: readonly string[] }
+  >();
   const used = new Set<string>();
   const vault: IssueVault = {
     prepare: (items) => {
@@ -39,7 +50,7 @@ function memoryVault() {
         values: items.map((entry) => {
           const existing = stored.get(entry.normalised);
           if (existing !== undefined) {
-            return { kind: 'existing' as const, standIn: existing };
+            return { kind: 'existing' as const, ...existing };
           }
           fresh += 1;
           return {
@@ -55,7 +66,10 @@ function memoryVault() {
         values: entries.map((entry): CommittedValue => {
           if (used.has(entry.standIn)) return { kind: 'taken' };
           used.add(entry.standIn);
-          stored.set(entry.item.normalised, entry.standIn);
+          stored.set(entry.item.normalised, {
+            standIn: entry.standIn,
+            variants: entry.variants,
+          });
           return { kind: 'inserted', standIn: entry.standIn };
         }),
         missing: 0,
@@ -220,7 +234,13 @@ describe('one commit per send', () => {
   const existing: IssueVault['prepare'] = () =>
     Promise.resolve({
       dateOffsetDays: 30,
-      values: [{ kind: 'existing', standIn: 'standin.1.ab12@example.net' }],
+      values: [
+        {
+          kind: 'existing',
+          standIn: 'standin.1.ab12@example.net',
+          variants: [],
+        },
+      ],
     });
 
   it('commits stored values as reused, even with nothing new', async () => {
@@ -232,7 +252,7 @@ describe('one commit per send', () => {
         return Promise.resolve({ values: [], missing: 0 });
       },
     };
-    const standIns = await issueStandIns([item], vault, {
+    const standIns = await issueValues([item], vault, {
       standIn: testEngine().standIn,
       fits: () => true,
       now: 0,
@@ -247,7 +267,7 @@ describe('one commit per send', () => {
       commit: () => Promise.resolve({ values: [], missing: 1 }),
     };
     await expect(
-      issueStandIns([item], vault, {
+      issueValues([item], vault, {
         standIn: testEngine().standIn,
         fits: () => true,
         now: 0,
@@ -268,5 +288,77 @@ describe('one commit per send', () => {
     expect(peeked[0]).toHaveLength(REAL.length);
     await prepare('nothing to mask here');
     expect(peeked).toHaveLength(1);
+  });
+});
+
+describe('dates of birth in the pipeline', () => {
+  const today = calendarDay(Date.now());
+  const datesIn = (text: string): string[] =>
+    findDateSpans(text).map((span) => text.slice(span.start, span.end));
+
+  it('gives every writing of one date the same stand-in date, written its way', async () => {
+    const { transform, reports } = pipeline();
+    const prompt =
+      'DOB 12/03/1990. She was born on 12 March 1990 (birthday: 1990-03-12).';
+    const first = await transform(prompt);
+    const written = datesIn(first);
+    expect(written).toHaveLength(3);
+    expect(written[0]).toMatch(/^\d{2}\/\d{2}\/19(?:89|90|91)$/u);
+    expect(written[1]).toMatch(/^\d{1,2} [A-Z][a-z]+ 19(?:89|90|91)$/u);
+    expect(written[2]).toMatch(/^19(?:89|90|91)-\d{2}-\d{2}$/u);
+    const dates = new Set(
+      written.map((text) => {
+        const reading = readDate(text, 'GB', today);
+        return reading === null ? '' : isoDate(reading.date);
+      }),
+    );
+    expect(dates.size).toBe(1);
+    expect(dates.has('1990-03-12')).toBe(false);
+    expect(reports[0]?.masked).toBe(1);
+    // Sent again (stored now, in another writing first): the same text.
+    expect(await transform(prompt)).toBe(first);
+    expect(await transform('born on 12 March 1990 (DOB 12/03/1990)')).toBe(
+      `born on ${written[1] ?? ''} (DOB ${written[0] ?? ''})`,
+    );
+  });
+
+  it('counts dates whose day and month could go either way', async () => {
+    const { transform, reports } = pipeline();
+    await transform('DOB 03/04/1990');
+    await transform('DOB 25/04/1991');
+    expect(reports.map((report) => report.ambiguousDates)).toEqual([1, 0]);
+  });
+});
+
+describe('card stand-ins in the pipeline', () => {
+  /** A Luhn-valid Maestro number made from a label (in memory only). */
+  function maestro(label: string): string {
+    const bytes = sha256(utf8ToBytes(label));
+    let body = '6759';
+    for (let i = 0; body.length < 15; i += 1) {
+      body += ((bytes[i] ?? 0) % 10).toString();
+    }
+    for (let check = 0; check < 10; check += 1) {
+      const number = body + check.toString();
+      let sum = 0;
+      for (const [i, char] of Array.from(number).reverse().entries()) {
+        let digit = Number(char);
+        if (i % 2 === 1) digit = digit * 2 > 9 ? digit * 2 - 9 : digit * 2;
+        sum += digit;
+      }
+      if (sum % 10 === 0) return number;
+    }
+    throw new Error('no check digit');
+  }
+
+  it('borrows a related brand number once the brand is used up, and counts it', async () => {
+    const { transform, reports } = pipeline();
+    const cards = ['a', 'b', 'c'].map((label) => maestro(`maestro ${label}`));
+    const masked = await transform(
+      `cards ${cards[0] ?? ''}, ${cards[1] ?? ''} and ${cards[2] ?? ''}`,
+    );
+    for (const card of cards) expect(masked).not.toContain(card);
+    // Two Maestro test numbers are published: the third value borrows.
+    expect(reports[0]?.cardFallbacks).toBe(1);
   });
 });

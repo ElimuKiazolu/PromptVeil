@@ -172,7 +172,11 @@ describe('vault message shapes', () => {
       prepare.response(
         reply([
           { kind: 'new', seed: SEED, number: 1 },
-          { kind: 'existing', standIn: 'standin.2@example.net' },
+          {
+            kind: 'existing',
+            standIn: '01/05/1991',
+            variants: ['DMY'],
+          },
         ]),
       ),
     ).toBe(true);
@@ -180,7 +184,10 @@ describe('vault message shapes', () => {
       { kind: 'new', seed: 'A'.repeat(44), number: 1 },
       { kind: 'new', seed: SEED, number: 0 },
       { kind: 'new', seed: SEED, number: 1.5 },
-      { kind: 'existing', standIn: '' },
+      { kind: 'existing', standIn: '', variants: [] },
+      // Stored values carry their variants.
+      { kind: 'existing', standIn: 'standin.2@example.net' },
+      { kind: 'existing', standIn: 'x', variants: [7] },
       { kind: 'other' },
     ]) {
       expect(prepare.response(reply([item]))).toBe(false);
@@ -191,7 +198,11 @@ describe('vault message shapes', () => {
         status: 'ok',
         items: [
           { kind: 'inserted', standIn: 'standin.1@example.net' },
-          { kind: 'existing', standIn: 'standin.2@example.net' },
+          {
+            kind: 'existing',
+            standIn: 'standin.2@example.net',
+            variants: [],
+          },
           { kind: 'taken' },
         ],
         missing: 0,

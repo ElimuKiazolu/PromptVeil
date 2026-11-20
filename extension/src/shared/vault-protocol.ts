@@ -60,7 +60,8 @@ export interface PrepareRequest {
 }
 
 export type PreparedItem =
-  | { kind: 'existing'; standIn: string }
+  /** Stored: the stand-in and its stand-in-side variants (a DOB's order). */
+  | { kind: 'existing'; standIn: string; variants: string[] }
   /** A value new to the conversation: its seed (base64, 32 bytes) and number. */
   | { kind: 'new'; seed: string; number: number };
 
@@ -100,7 +101,9 @@ export interface CommitRequest {
 }
 
 export type CommittedItem =
-  { kind: 'inserted' | 'existing'; standIn: string } | { kind: 'taken' };
+  | { kind: 'inserted'; standIn: string }
+  | { kind: 'existing'; standIn: string; variants: string[] }
+  | { kind: 'taken' };
 
 export type CommitResponse =
   | {
@@ -234,7 +237,10 @@ const SEED = /^[A-Za-z0-9+/]{43}=$/u;
 function isPreparedItem(value: unknown): value is PreparedItem {
   if (!isObject(value)) return false;
   if (value.kind === 'existing') {
-    return isBoundedString(value.standIn, MAX_VALUE_LENGTH);
+    return (
+      isBoundedString(value.standIn, MAX_VALUE_LENGTH) &&
+      isVariants(value.variants)
+    );
   }
   return (
     value.kind === 'new' &&
@@ -322,9 +328,10 @@ function isCommitRequest(value: unknown): value is CommitRequest {
 function isCommittedItem(value: unknown): value is CommittedItem {
   if (!isObject(value)) return false;
   if (value.kind === 'taken') return true;
+  if (!isBoundedString(value.standIn, MAX_VALUE_LENGTH)) return false;
   return (
-    (value.kind === 'inserted' || value.kind === 'existing') &&
-    isBoundedString(value.standIn, MAX_VALUE_LENGTH)
+    value.kind === 'inserted' ||
+    (value.kind === 'existing' && isVariants(value.variants))
   );
 }
 

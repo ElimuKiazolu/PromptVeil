@@ -48,7 +48,7 @@ export function createMemoryMasker(options: {
       const values = items.map((item): PreparedValue => {
         const existing = byKey.get(item.normalised);
         if (existing !== undefined) {
-          return { kind: 'existing', standIn: existing.standIn };
+          return { kind: 'existing', standIn: existing.standIn, variants: [] };
         }
         fresh += 1;
         return {
@@ -63,7 +63,7 @@ export function createMemoryMasker(options: {
       const values = entries.map((entry): CommittedValue => {
         const existing = byKey.get(entry.item.normalised);
         if (existing !== undefined) {
-          return { kind: 'existing', standIn: existing.standIn };
+          return { kind: 'existing', standIn: existing.standIn, variants: [] };
         }
         if (usedStandIns.has(entry.standIn.toLowerCase())) {
           return { kind: 'taken' };

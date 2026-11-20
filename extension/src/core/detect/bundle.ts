@@ -34,7 +34,7 @@ import { localeForRegion, type LocaleId } from '../surrogate/words/locales.ts';
 import { createWordStore, type WordLoader } from '../surrogate/words/store.ts';
 
 /** Changes whenever the module's exports change shape. */
-export const DETECTION_API_VERSION = 5;
+export const DETECTION_API_VERSION = 6;
 
 export interface DetectionConfig {
   readonly homeRegions: readonly CountryCode[];

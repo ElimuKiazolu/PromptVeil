@@ -59,6 +59,8 @@ export type DevEvent =
   | 'session.dropped'
   | 'pipeline.timing'
   | 'pipeline.possible'
+  | 'pipeline.ambiguous-dates'
+  | 'pipeline.card-fallback'
   | 'settings.loaded'
   | 'settings.failed';
 

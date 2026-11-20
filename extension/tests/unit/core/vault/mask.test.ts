@@ -136,6 +136,7 @@ describe('prepareMask', () => {
     expect(prepared.values[1]).toEqual({
       kind: 'existing',
       standIn: standIns[0],
+      variants: [],
     });
     expect(prepared.values[0]).toMatchObject({ kind: 'new', number: 2 });
   });
@@ -177,6 +178,7 @@ describe('peekMask', () => {
     expect(peeked.values[0]).toEqual({
       kind: 'existing',
       standIn: standIns[0],
+      variants: [],
     });
   });
 });
@@ -257,7 +259,7 @@ describe('commitMask', () => {
     ]);
     expect(result.values).toEqual([
       { kind: 'inserted', standIn: 'standin.1@example.net' },
-      { kind: 'existing', standIn: 'standin.1@example.net' },
+      { kind: 'existing', standIn: 'standin.1@example.net', variants: [] },
       { kind: 'taken' },
     ]);
     expect(result.inserted).toBe(1);
@@ -272,7 +274,9 @@ describe('commitMask', () => {
     ).toEqual({
       inserted: 0,
       missing: 0,
-      values: [{ kind: 'existing', standIn: 'standin.1@example.net' }],
+      values: [
+        { kind: 'existing', standIn: 'standin.1@example.net', variants: [] },
+      ],
     });
   });
 
