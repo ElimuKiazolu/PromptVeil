@@ -115,6 +115,21 @@ describe('vault message shapes', () => {
     }
   });
 
+  it('accepts word-list locales with a region or a script', () => {
+    const request = (locale: unknown) =>
+      commit.request({
+        conversationId: 'chatgpt:6800a1b2-c3d4',
+        entries: [{ ...ENTRY, locale }],
+        reused: [],
+      });
+    for (const locale of ['en_GB', 'en_SG', 'zh_Latn', 'de', null]) {
+      expect(request(locale), String(locale)).toBe(true);
+    }
+    for (const locale of ['zh_latn', 'en-GB', 'english', 'zh_Latin', 7]) {
+      expect(request(locale), String(locale)).toBe(false);
+    }
+  });
+
   it('limits prepare and commit requests to 1–200 items', () => {
     const request = (count: number) => ({
       conversationId: 'chatgpt:abcdefgh',

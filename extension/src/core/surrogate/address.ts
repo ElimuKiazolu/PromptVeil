@@ -376,10 +376,20 @@ interface Replacer {
   readonly avoid: Set<string>;
 }
 
-function nameWord(replacer: Replacer, like: string): string | null {
+/**
+ * A word of a street's name: one of the locale's real street names where it
+ * has them (Serangoon, Station), else a family name (streets are often
+ * named after people).
+ */
+function streetWord(replacer: Replacer, like: string): string | null {
+  const { streets } = replacer.words;
   const picked = pickWord(
     replacer.rng,
-    familyNames(replacer.words, null).filter((name) => !/[\s-]/u.test(name)),
+    streets.length > 0
+      ? streets
+      : familyNames(replacer.words, null).filter(
+          (name) => !/[\s-]/u.test(name),
+        ),
     replacer.avoid,
   );
   if (picked === null) return null;
@@ -430,7 +440,8 @@ const WORD = /[^\s]+/gu;
 
 /**
  * The street line: numbers replaced, a glued type kept on a new stem, type
- * words and unit words kept, the other words replaced by family names.
+ * words and unit words kept, the other words replaced by street names
+ * (see streetWord).
  */
 function streetLine(replacer: Replacer, line: string): string | null {
   const types = streetTypes(replacer.words);
@@ -470,10 +481,10 @@ function streetLine(replacer: Replacer, line: string): string | null {
     );
     if (type !== undefined) {
       const stem = word.slice(0, word.length - type.length);
-      const name = nameWord(replacer, stem);
+      const name = streetWord(replacer, stem);
       return name === null ? null : name + word.slice(stem.length);
     }
-    return nameWord(replacer, word);
+    return streetWord(replacer, word);
   });
 }
 

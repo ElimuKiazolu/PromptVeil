@@ -187,6 +187,47 @@ export function lookUpName(
 
 export type Role = 'given' | 'family';
 
+/**
+ * Word lists whose names are written family name first in Latin letters:
+ * Chinese names in pinyin ("Wang Wei") and Singaporean names ("Lim Boon
+ * Keng").
+ */
+const FAMILY_FIRST_LOCALES: readonly string[] = ['zh_Latn', 'en_SG'];
+
+/**
+ * True when a family-first list reads the name that way: it knows the first
+ * word as a family name and each other word as one of its given names or
+ * as no list's given name (Chinese given syllables are often surnames too:
+ * "Boon" in "Lim Boon Keng"), and no other list knows the first word as a
+ * given name ("Lee Morgan" stays given name first). Two pinyin surnames
+ * ("Wei Wang") are read family first, as Chinese writes them.
+ */
+function familyFirstByList(
+  index: NameIndex | undefined,
+  first: string,
+  others: readonly string[],
+): boolean {
+  if (index === undefined) return false;
+  const firstHit = lookUpName(index, first);
+  const familyFirstMask = FAMILY_FIRST_LOCALES.reduce((mask, id) => {
+    const bit = index.locales.indexOf(id);
+    return bit < 0 ? mask : mask | (1 << bit);
+  }, 0);
+  if ((firstHit.given & ~familyFirstMask) !== 0) return false;
+  return FAMILY_FIRST_LOCALES.some((id) => {
+    const bit = index.locales.indexOf(id);
+    if (bit < 0) return false;
+    const mask = 1 << bit;
+    return (
+      (firstHit.family & mask) !== 0 &&
+      others.every((word) => {
+        const hit = lookUpName(index, word);
+        return (hit.given & mask) !== 0 || hit.given === 0;
+      })
+    );
+  });
+}
+
 const isUpperWord = (text: string): boolean =>
   text.length > 1 && text === text.toUpperCase() && text !== text.toLowerCase();
 
@@ -195,8 +236,9 @@ const isUpperWord = (text: string): boolean =>
  * is the family name and earlier ones are given names, unless the name is
  * written family first: CJK names with spaces, a comma after the first word
  * ("Pemberton, Harriet"), a first word in capitals before ones that are not
- * ("DUPONT Jean"), or a first word that the lists know only as a family name
- * before a last word they know only as a given name. A single word is a
+ * ("DUPONT Jean"), a first word that the lists know only as a family name
+ * before a last word they know only as a given name, or a name a
+ * family-first list reads that way (see familyFirstByList). A single word is a
  * family name only when the lists know it only as one.
  */
 export function rolesOf(
@@ -237,7 +279,8 @@ export function rolesOf(
     commaAfterFirst ||
     (isUpperWord(textOf(firstWord)) &&
       words.slice(1).some((word) => !isUpperWord(textOf(word)))) ||
-    (onlyFamily(firstWord) && onlyGiven(lastWord));
+    (onlyFamily(firstWord) && onlyGiven(lastWord)) ||
+    familyFirstByList(index, textOf(firstWord), words.slice(1).map(textOf));
   const familyWord = familyFirst ? firstWord : lastWord;
   return names.map((piece) => (piece.word === familyWord ? 'family' : 'given'));
 }

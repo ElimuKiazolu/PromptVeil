@@ -1,0 +1,7 @@
+# Labels and kinds (given name by gender, family name) of the name items a
+# count query returned (the fetch script puts their IDs in the VALUES list).
+SELECT ?name ?label ?lang ?kind WHERE {
+  VALUES ?name { {{NAMES}} }
+  OPTIONAL { ?name rdfs:label ?label. BIND(LANG(?label) AS ?lang) FILTER(?lang IN ("mul", "en", "pt")) }
+  OPTIONAL { ?name wdt:P31 ?kind. }
+} ORDER BY ?name ?lang ?kind

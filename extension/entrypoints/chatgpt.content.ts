@@ -131,6 +131,7 @@ export default defineContentScript({
         possible,
         ambiguousDates,
         cardFallbacks,
+        nextReadings,
       }) => {
         devlog('pipeline.timing', { count: masked, timings });
         // Not masked until the Review panel (P9); counted only.
@@ -142,6 +143,10 @@ export default defineContentScript({
         // Card stand-ins taken from a related brand's test numbers.
         if (cardFallbacks > 0) {
           devlog('pipeline.card-fallback', { count: cardFallbacks });
+        }
+        // Masked in their span's next reading (the first had no stand-in).
+        if (nextReadings > 0) {
+          devlog('pipeline.next-reading', { count: nextReadings });
         }
       },
     });

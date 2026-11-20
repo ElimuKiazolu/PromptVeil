@@ -28,6 +28,13 @@
  * Dates of birth: every writing of one date shares a mapping (the normal
  * form is the date), and each occurrence gets the stand-in date written
  * the way that occurrence is written (read in the stand-in's stored order).
+ *
+ * A reading that cannot produce a stand-in (a card length with no published
+ * test number left, a type without a generator, every attempt taken) gives
+ * way to the span's next reading that can (an 18-digit Chinese ID that also
+ * passes the Luhn check as a UnionPay number): the send is retried with that
+ * reading. Only when no reading of the span can is the send blocked, with
+ * the first reading's error.
  */
 import type { Detection, EntityType } from '../shared/entities.ts';
 import type { MaskItem } from '../shared/vault-protocol.ts';
@@ -156,6 +163,33 @@ export class StandInsExhaustedError extends Error {
   }
 }
 
+/**
+ * Errors that mean "this reading has no stand-in" (matched by name: the
+ * engine's errors come from the detection module, another bundle).
+ */
+const NO_STAND_IN_ERRORS: ReadonlySet<string> = new Set([
+  'StandInsExhaustedError',
+  'TestCardsExhaustedError',
+  'StandInError',
+]);
+
+/**
+ * Thrown by issueStandIns when the item at `index` cannot get a stand-in in
+ * its reading; `cause` says why. The pipeline then tries the span's next
+ * reading.
+ */
+export class NoStandInError extends Error {
+  readonly index: number;
+  override readonly cause: Error;
+
+  constructor(index: number, cause: Error) {
+    super('no-stand-in');
+    this.name = 'NoStandInError';
+    this.index = index;
+    this.cause = cause;
+  }
+}
+
 /** Time spent per phase of one send, in ms. */
 export interface PipelineTimings {
   rules: number;
@@ -181,6 +215,11 @@ export interface PipelineReport {
    * length used up in the conversation).
    */
   cardFallbacks: number;
+  /**
+   * Values masked in another reading of their span, the first having no
+   * stand-in (e.g. an 18-digit number masked as an ID, not a card).
+   */
+  nextReadings: number;
 }
 
 /**
@@ -408,9 +447,17 @@ export async function issueStandIns(
         const request = requestOf(entry);
         for (;;) {
           if (entry.attempt >= MAX_STAND_IN_ATTEMPTS) {
-            throw new StandInsExhaustedError();
+            throw new NoStandInError(entry.index, new StandInsExhaustedError());
           }
-          const standIn = options.standIn(request, entry.seed, entry.attempt);
+          let standIn: StandIn | null;
+          try {
+            standIn = options.standIn(request, entry.seed, entry.attempt);
+          } catch (error) {
+            if (error instanceof Error && NO_STAND_IN_ERRORS.has(error.name)) {
+              throw new NoStandInError(entry.index, error);
+            }
+            throw error;
+          }
           if (
             standIn !== null &&
             !chosen.has(compact(standIn.value)) &&
@@ -613,6 +660,47 @@ function replacementFor(
   return writeAs(here.writing, here.order, date) ?? standIn.value;
 }
 
+/**
+ * Types whose readings are vouched for by a check digit: a span read as one
+ * of them may be masked in another of them instead (a card number that is
+ * also an ID). A weaker reading (a 13-digit card as a foreign phone number)
+ * is never used: such a card blocks the send.
+ */
+const NEXT_READING_TYPES: ReadonlySet<EntityType> = new Set<EntityType>([
+  'CARD',
+  'BANK',
+  'NATIONAL_ID',
+]);
+
+/**
+ * The other readings of a detection's span that the pipeline could mask
+ * instead, most likely first, as detections of the same text: checksum
+ * formats (NEXT_READING_TYPES) of masked types, read from one of them.
+ */
+function otherReadings(
+  detection: Detection,
+  types: ReadonlySet<EntityType>,
+): Detection[] {
+  if (!NEXT_READING_TYPES.has(detection.type)) return [];
+  return detection.alternatives
+    .filter(
+      (reading) =>
+        types.has(reading.type) &&
+        NEXT_READING_TYPES.has(reading.type) &&
+        (reading.type !== detection.type ||
+          reading.subtype !== detection.subtype ||
+          reading.country !== detection.country),
+    )
+    .map((reading) => ({
+      ...detection,
+      type: reading.type,
+      subtype: reading.subtype,
+      country: reading.country,
+      confidence: reading.confidence,
+      alternatives: [],
+    }));
+}
+
 /** A date of birth whose numbers allowed two dates. */
 function isAmbiguousDate(detection: Detection, now: number): boolean {
   if (detection.type !== 'DOB') return false;
@@ -634,6 +722,8 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     const types = options.entityTypes();
     const spans: { detection: Detection; key: string }[] = [];
     const items = new Map<string, MaskItem>();
+    /** Each item's other readings of its span, most likely first. */
+    const others = new Map<string, Detection[]>();
     let possible = 0;
     let ambiguousDates = 0;
     for (const detection of detections) {
@@ -651,10 +741,13 @@ export function createPipeline(options: PipelineOptions): Pipeline {
       const key = itemKey(item);
       if (isAmbiguousDate(detection, now())) ambiguousDates += 1;
       // Each value goes to the vault once, however often it appears.
-      if (!items.has(key)) items.set(key, item);
+      if (!items.has(key)) {
+        items.set(key, item);
+        others.set(key, otherReadings(detection, types));
+      }
       spans.push({ detection, key });
     }
-    return { spans, items, possible, ambiguousDates };
+    return { spans, items, others, possible, ambiguousDates };
   };
 
   const prepare = async (text: string): Promise<void> => {
@@ -670,7 +763,7 @@ export function createPipeline(options: PipelineOptions): Pipeline {
     const started = clock();
     const detections = await detect(text);
     const rules = clock() - started;
-    const { spans, items, possible, ambiguousDates } =
+    const { spans, items, others, possible, ambiguousDates } =
       await collect(detections);
     const timings: PipelineTimings = {
       rules,
@@ -687,33 +780,65 @@ export function createPipeline(options: PipelineOptions): Pipeline {
         possible,
         ambiguousDates,
         cardFallbacks: 0,
+        nextReadings: 0,
       });
       return text;
     }
 
-    const unique = [...items.entries()];
-    const uniqueItems = unique.map(([, item]) => item);
     const issued = options.issued?.() ?? [];
-    const view = promptView(text, detections, uniqueItems, issued);
     const engine = await options.engine();
     const masked = now();
     const counts = { fallbacks: 0 };
-    const standIns = await options.mask(uniqueItems, (vault) =>
-      issueStandIns(uniqueItems, vault, {
-        standIn: engine.standIn,
-        load: (requests) => engine.load(requests),
-        relations: issueRelations(uniqueItems, issued, view),
-        // A stand-in this conversation already uses is skipped here, so it
-        // costs no commit round trip (the vault checks it again).
-        fits: (item, standIn) =>
-          !isIssued(standIn.value) && fitsPrompt(view, item.type, standIn),
-        now: masked,
-        checkpoint: options.checkpoint?.(),
-        clock,
-        timings,
-        counts,
-      }),
-    );
+    let nextReadings = 0;
+    let unique = [...items.entries()];
+    let standIns: readonly IssuedStandIn[];
+    for (;;) {
+      const uniqueItems = unique.map(([, item]) => item);
+      const view = promptView(text, detections, uniqueItems, issued);
+      try {
+        standIns = await options.mask(uniqueItems, (vault) =>
+          issueStandIns(uniqueItems, vault, {
+            standIn: engine.standIn,
+            load: (requests) => engine.load(requests),
+            relations: issueRelations(uniqueItems, issued, view),
+            // A stand-in this conversation already uses is skipped here, so
+            // it costs no commit round trip (the vault checks it again).
+            fits: (item, standIn) =>
+              !isIssued(standIn.value) && fitsPrompt(view, item.type, standIn),
+            now: masked,
+            checkpoint: options.checkpoint?.(),
+            clock,
+            timings,
+            counts,
+          }),
+        );
+        break;
+      } catch (error) {
+        if (!(error instanceof NoStandInError)) throw error;
+        const [key] = unique[error.index] ?? [];
+        const next = key === undefined ? undefined : others.get(key)?.[0];
+        if (key === undefined || next === undefined) throw error.cause;
+        // The span's next reading; values stored meanwhile are reused.
+        const item: MaskItem = {
+          type: next.type,
+          subtype: next.subtype,
+          country: next.country,
+          value: next.value,
+          normalised: await normalise(next),
+        };
+        const nextKey = itemKey(item);
+        others.set(nextKey, others.get(key)?.slice(1) ?? []);
+        for (const span of spans) if (span.key === key) span.key = nextKey;
+        unique = unique.flatMap((entry): [string, MaskItem][] => {
+          if (entry[0] !== key) return [entry];
+          // Already masked in this reading by another span: one item.
+          return unique.some(([other]) => other === nextKey)
+            ? []
+            : [[nextKey, item]];
+        });
+        nextReadings += 1;
+      }
+    }
     if (standIns.length !== unique.length) {
       throw new RangeError('one stand-in per item expected');
     }
@@ -739,6 +864,7 @@ export function createPipeline(options: PipelineOptions): Pipeline {
       possible,
       ambiguousDates,
       cardFallbacks: counts.fallbacks,
+      nextReadings,
     });
     return out + text.slice(cursor);
   };

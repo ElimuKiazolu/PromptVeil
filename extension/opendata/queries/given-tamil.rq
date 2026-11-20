@@ -1,0 +1,4 @@
+# Given name items of people who speak Tamil, most frequent first.
+SELECT ?name (COUNT(?person) AS ?n) WHERE {
+  ?person wdt:P1412 wd:Q5885; wdt:P735 ?name.
+} GROUP BY ?name ORDER BY DESC(?n) ?name LIMIT 2000

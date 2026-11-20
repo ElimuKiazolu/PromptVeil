@@ -2,8 +2,8 @@
  * The bundled word-list files and how they are checked when loaded.
  *
  * - `<locale>.json` (LocaleWords): given names by gender, family names,
- *   legal suffixes, street types, localities and postcode templates of one
- *   locale.
+ *   legal suffixes, street types, street names, localities and postcode
+ *   templates of one locale.
  * - `names.json` (NameIndex): every name of every locale with the locales
  *   that list it, so a name's likely locale and gender can be inferred
  *   before that locale's file is loaded. Names are grouped by their flags:
@@ -16,7 +16,7 @@
 import { runBlocking } from '../../detect/schedule.ts';
 
 /** Changes whenever the files' shape changes; files must carry it. */
-export const WORDLIST_VERSION = 2;
+export const WORDLIST_VERSION = 3;
 
 /** Separates the names of one group in `names.json`. */
 export const NAME_SEPARATOR = '|';
@@ -43,6 +43,8 @@ export interface LocaleWords {
   readonly legal: readonly string[];
   readonly streetTypes: readonly string[];
   readonly streetTypeOrder: StreetTypeOrder;
+  /** Real one-word street names, without their type (Serangoon, Station). */
+  readonly streets: readonly string[];
   readonly localities: readonly string[];
   readonly postcodes: readonly string[];
 }
@@ -125,6 +127,7 @@ export function parseLocaleWords(value: unknown, locale: string): LocaleWords {
     legal: strings(file.legal),
     streetTypes: strings(file.streetTypes),
     streetTypeOrder: order,
+    streets: strings(file.streets),
     localities: strings(file.localities),
     postcodes: strings(file.postcodes),
   };

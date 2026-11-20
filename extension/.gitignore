@@ -27,3 +27,6 @@ web-ext.config.ts
 
 # Model files: downloaded by npm run models:fetch, never committed
 public/models/
+
+# Open data: downloaded by npm run opendata:fetch, never committed
+opendata/raw/

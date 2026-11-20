@@ -26,7 +26,9 @@
     "bench:build:nocoi": "wxt build --mode bench-nocoi",
     "bench:rules": "node scripts/bench-rules.ts",
     "generate:phone-shares": "node scripts/generate-phone-shares.ts && prettier --write src/core/detect/validators/phone-shares.generated.ts",
-    "generate:wordlists": "node scripts/build-wordlists.ts"
+    "generate:wordlists": "node scripts/build-wordlists.ts",
+    "opendata:fetch": "node scripts/opendata/fetch.ts",
+    "opendata:extract": "node scripts/opendata/extract.ts"
   },
   "dependencies": {
     "@fontsource/instrument-sans": "5.3.0",

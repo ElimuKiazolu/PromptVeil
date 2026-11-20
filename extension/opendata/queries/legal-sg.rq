@@ -1,0 +1,5 @@
+# Legal forms of organisations in Singapore with their short names.
+SELECT ?form ?short (COUNT(?org) AS ?n) WHERE {
+  ?org wdt:P17 wd:Q334; wdt:P1454 ?form.
+  ?form wdt:P1813 ?short.
+} GROUP BY ?form ?short ORDER BY DESC(?n) ?short LIMIT 200

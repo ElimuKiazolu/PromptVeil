@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { allLocales } from '@faker-js/faker';
 import { describe, expect, it } from 'vitest';
+import { readExtracted } from '@/scripts/opendata/extracted.ts';
 import { buildWordLists } from '@/scripts/wordlists.ts';
 import {
   parseLocaleWords,
@@ -22,7 +23,7 @@ const DATA = fileURLToPath(
 );
 
 describe('bundled word lists', () => {
-  it('are exactly what the installed Faker version gives (npm run generate:wordlists)', () => {
+  it('are exactly what the installed Faker version and the extracted open data give (npm run generate:wordlists)', () => {
     const packageJson: unknown = JSON.parse(
       readFileSync(
         fileURLToPath(new URL('../../../../package.json', import.meta.url)),
@@ -44,7 +45,7 @@ describe('bundled word lists', () => {
     expect(packageJson).toMatchObject({
       devDependencies: { '@faker-js/faker': '10.6.0' },
     });
-    const build = buildWordLists(allLocales);
+    const build = buildWordLists(allLocales, readExtracted());
     const names = readdirSync(DATA).filter((name) => name.endsWith('.json'));
     expect(names.sort()).toEqual(build.files.map((file) => file.name).sort());
     for (const file of build.files) {
@@ -53,7 +54,9 @@ describe('bundled word lists', () => {
   });
 
   it('build deterministically', () => {
-    expect(buildWordLists(allLocales)).toEqual(buildWordLists(allLocales));
+    expect(buildWordLists(allLocales, readExtracted())).toEqual(
+      buildWordLists(allLocales, readExtracted()),
+    );
   });
 
   it('stay within NFR4 (5 MB for all locale lists)', () => {
@@ -130,11 +133,12 @@ describe('bundled word lists', () => {
     expect(fr.streetTypes).toContain('Rue');
   });
 
-  it('map regions to locales (no Singapore locale exists)', () => {
+  it('map regions to locales (pinyin names belong to no region)', () => {
     expect(localeForRegion('GB')?.id).toBe('en_GB');
     expect(localeForRegion('BR')?.id).toBe('pt_BR');
     expect(localeForRegion('AT')?.id).toBe('de');
-    expect(localeForRegion('SG')).toBeUndefined();
+    expect(localeForRegion('SG')?.id).toBe('en_SG');
+    expect(localeForRegion('CN')?.id).toBe('zh_CN');
   });
 });
 

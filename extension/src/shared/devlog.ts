@@ -61,6 +61,7 @@ export type DevEvent =
   | 'pipeline.possible'
   | 'pipeline.ambiguous-dates'
   | 'pipeline.card-fallback'
+  | 'pipeline.next-reading'
   | 'settings.loaded'
   | 'settings.failed';
 

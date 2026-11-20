@@ -1,0 +1,5 @@
+# Portuguese names of streets in Brazil (for their street types).
+SELECT ?street ?label WHERE {
+  ?street wdt:P31 wd:Q79007; wdt:P17 wd:Q155; rdfs:label ?label.
+  FILTER(LANG(?label) = "pt")
+} ORDER BY ?street LIMIT 20000

@@ -27,6 +27,12 @@ import {
   type PipelineReport,
 } from '@/src/core/pipeline.ts';
 import { testEngine } from '../word-lists.ts';
+import {
+  gansuIdAlsoLuhn,
+  southAfricanIdAlsoVisa,
+  visa13WithoutId,
+} from './next-reading.helpers.ts';
+import type { CountryCode } from '@/src/shared/country.ts';
 import type { Detection, EntityType } from '@/src/shared/entities.ts';
 
 /** The stand-ins issued, as text. */
@@ -360,5 +366,61 @@ describe('card stand-ins in the pipeline', () => {
     for (const card of cards) expect(masked).not.toContain(card);
     // Two Maestro test numbers are published: the third value borrows.
     expect(reports[0]?.cardFallbacks).toBe(1);
+  });
+});
+
+describe('next reading instead of blocking', () => {
+  const detectWith = (homeRegions: readonly CountryCode[]) => (text: string) =>
+    detectRules(text, {
+      homeRegions,
+      entityTypes: MASKABLE_TYPES,
+      packs: COUNTRY_PACKS,
+      exclude: [],
+    });
+
+  for (const home of ['US', 'GB'] as const) {
+    it(`masks an 18-digit Gansu ID that also passes Luhn as an ID (home ${home})`, async () => {
+      const id = gansuIdAlsoLuhn();
+      const detect = detectWith([home]);
+      // Read as a UnionPay card first: no 18-digit test number exists.
+      const [found] = await detect(`My number is ${id}.`);
+      expect(found?.type).toBe('CARD');
+      expect(found?.alternatives.map((a) => a.subtype)).toContain('CN_RIC');
+      const { transform, reports } = pipeline({ detect });
+      const masked = await transform(`My number is ${id}.`);
+      const standIn = /\d{17}[\dX]/u.exec(masked)?.[0] ?? '';
+      expect(standIn).not.toBe(id);
+      expect(standIn.slice(0, 2)).toBe('62');
+      expect(reports[0]?.nextReadings).toBe(1);
+      // The stand-in is a well-formed Chinese ID, not a card.
+      const again = await detect(`ID ${standIn}`);
+      expect(again.map((d) => d.subtype)).toContain('CN_RIC');
+    });
+  }
+
+  it('masks a South African ID that reads as a 13-digit Visa number as an ID', async () => {
+    const id = southAfricanIdAlsoVisa();
+    const { transform, reports } = pipeline();
+    const masked = await transform(`My number is ${id}.`);
+    expect(masked).not.toContain(id);
+    const standIn = /\d{13}/u.exec(masked)?.[0] ?? '';
+    expect(standIn).not.toBe('');
+    expect(reports[0]?.nextReadings).toBe(1);
+    // Read as a card again first (it still passes Luhn), with its ID reading.
+    const again = await detectAll(`ID ${standIn}`);
+    expect(
+      again.flatMap((d) => [
+        d.subtype,
+        ...d.alternatives.map((a) => a.subtype),
+      ]),
+    ).toContain('ZA_ID');
+  });
+
+  it('still blocks a 13-digit card with no ID reading, with the card error', async () => {
+    const { transform, reports } = pipeline();
+    await expect(
+      transform(`My number is ${visa13WithoutId()}.`),
+    ).rejects.toMatchObject({ name: 'TestCardsExhaustedError' });
+    expect(reports).toEqual([]);
   });
 });

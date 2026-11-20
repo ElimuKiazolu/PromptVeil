@@ -354,7 +354,11 @@ describe('issueStandIns', () => {
     const vault = scriptedVault(() => 'taken');
     await expect(
       issueValues([item('a')], vault, options()),
-    ).rejects.toBeInstanceOf(StandInsExhaustedError);
+    ).rejects.toMatchObject({
+      name: 'NoStandInError',
+      index: 0,
+      cause: expect.any(StandInsExhaustedError) as unknown,
+    });
     expect(vault.commits).toHaveLength(MAX_STAND_IN_ATTEMPTS);
     // Nothing the prompt accepts: no commit at all.
     const silent = scriptedVault(() => 'inserted');
@@ -364,7 +368,11 @@ describe('issueStandIns', () => {
         silent,
         options(numberedStandIns, () => false),
       ),
-    ).rejects.toBeInstanceOf(StandInsExhaustedError);
+    ).rejects.toMatchObject({
+      name: 'NoStandInError',
+      index: 0,
+      cause: expect.any(StandInsExhaustedError) as unknown,
+    });
     expect(silent.commits).toEqual([]);
   });
 

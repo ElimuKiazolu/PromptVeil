@@ -12,6 +12,7 @@
  * only if Faker's German street names use it.
  */
 import { LOCALES, NAME_INDEX } from '../src/core/surrogate/words/locales.ts';
+import type { ExtractedLocale } from './opendata/extracted.ts';
 import {
   NAME_SEPARATOR,
   WORDLIST_VERSION,
@@ -161,6 +162,31 @@ function streetTypes(
   return { types: [], order: 'after', from: null };
 }
 
+/**
+ * Turkish street types, which Faker has only inside full street names
+ * ("Atatürk Bulvarı", "Kocatepe Caddesi", "Fatih Sokak"): the last word of
+ * the names, kept when at least two names end with it; written after the
+ * name.
+ */
+function turkishStreetTypes(
+  definitions: Definitions,
+  chain: readonly string[],
+): { types: string[]; order: StreetTypeOrder } {
+  const counts = new Map<string, number>();
+  for (const name of stringList(
+    lookup(definitions, chain, ['location', 'street_name']).value,
+  )) {
+    const last = name.trim().split(/\s+/u).at(-1) ?? '';
+    if (/^\p{L}+$/u.test(last)) counts.set(last, (counts.get(last) ?? 0) + 1);
+  }
+  return {
+    types: tidy(
+      [...counts].filter(([, count]) => count >= 2).map(([type]) => type),
+    ),
+    order: 'after',
+  };
+}
+
 /** Product of the per-position character sets of equal-length patterns. */
 function positionSets(patterns: readonly string[]): Set<string>[] {
   const sets: Set<string>[] = [];
@@ -242,7 +268,10 @@ function groupsOf(
   );
 }
 
-export function buildWordLists(definitions: Definitions): WordListBuild {
+export function buildWordLists(
+  definitions: Definitions,
+  extracted: readonly ExtractedLocale[] = [],
+): WordListBuild {
   const files: BuiltFile[] = [];
   const reports: LocaleReport[] = [];
   const index = new Map<string, [number, number, number, number]>();
@@ -256,21 +285,60 @@ export function buildWordLists(definitions: Definitions): WordListBuild {
     }
   };
 
-  for (const [position, { id }] of LOCALES.entries()) {
-    if (!(id in definitions)) throw new Error(`Faker has no locale ${id}`);
-    const chain = chainOf(definitions, id);
+  const extras = new Map(extracted.map((entry) => [entry.locale, entry]));
+  for (const [position, info] of LOCALES.entries()) {
+    const { id } = info;
+    if (info.faker !== null && !(info.faker in definitions)) {
+      throw new Error(`Faker has no locale ${info.faker}`);
+    }
+    const chain = info.faker === null ? [] : chainOf(definitions, info.faker);
+    const extra = extras.get(id);
     const inherited: Record<string, string> = {};
     const missing: string[] = [];
-    const note = (name: string, from: string | null, empty: boolean) => {
-      if (from === null || empty) missing.push(name);
-      else if (from !== id) inherited[name] = from;
+    /**
+     * Records where a field came from: Faker's own definitions, its parent
+     * language's, or the open data (replacing an inherited or missing list,
+     * or added to the locale's own).
+     */
+    const note = (
+      name: string,
+      from: string | null,
+      empty: boolean,
+      open: 'none' | 'replaced' | 'added' = 'none',
+    ) => {
+      if (open === 'replaced') inherited[name] = 'open data';
+      else if (open === 'added') inherited[name] = `${id} + open data`;
+      else if (from === null || empty) missing.push(name);
+      else if (from !== info.faker) inherited[name] = from;
     };
+    /** The open data replaces lists Faker only inherits, adds to its own. */
+    const openMode = (from: string | null, present: boolean) =>
+      !present
+        ? 'none'
+        : info.faker !== null && from === info.faker
+          ? 'added'
+          : 'replaced';
 
     const first = lookup(definitions, chain, ['person', 'first_name']);
-    const given = byGender(first.value);
-    const female = new Set(names(given.female));
-    const male = new Set(names(given.male));
-    const generic = names(given.generic);
+    const fakerGiven = byGender(first.value);
+    const givenMode = openMode(first.from, extra?.given !== undefined);
+    const keepFaker = givenMode !== 'replaced';
+    const female = new Set(
+      names([
+        ...(keepFaker ? fakerGiven.female : []),
+        ...(extra?.given?.female ?? []),
+      ]),
+    );
+    const male = new Set(
+      names([
+        ...(keepFaker ? fakerGiven.male : []),
+        ...(extra?.given?.male ?? []),
+      ]),
+    );
+    const generic = names([
+      ...(keepFaker ? fakerGiven.generic : []),
+      ...(extra?.given?.neutral ?? []),
+    ]);
     const both = [...female].filter((name) => male.has(name));
     const neutral = tidy([
       ...both,
@@ -281,25 +349,35 @@ export function buildWordLists(definitions: Definitions): WordListBuild {
       'given names',
       first.from,
       female.size + male.size + neutral.length === 0,
+      givenMode,
     );
 
     const last = lookup(definitions, chain, ['person', 'last_name']);
     const family = byGender(last.value);
-    const familyAny = names(family.generic);
-    const familyFemale = names(family.female);
-    const familyMale = names(family.male);
+    const familyMode = openMode(last.from, extra?.family !== undefined);
+    const familyAny = names([
+      ...(familyMode === 'replaced' ? [] : family.generic),
+      ...(extra?.family ?? []),
+    ]);
+    const familyFemale = familyMode === 'replaced' ? [] : names(family.female);
+    const familyMale = familyMode === 'replaced' ? [] : names(family.male);
     note(
       'family names',
       last.from,
       familyAny.length + familyFemale.length + familyMale.length === 0,
+      familyMode,
     );
 
     const legalLookup = lookup(definitions, chain, [
       'company',
       'legal_entity_type',
     ]);
-    const legal = tidy(stringList(legalLookup.value));
-    note('legal suffixes', legalLookup.from, legal.length === 0);
+    const legalMode = openMode(legalLookup.from, extra?.legal !== undefined);
+    const legal = tidy([
+      ...(legalMode === 'replaced' ? [] : stringList(legalLookup.value)),
+      ...(extra?.legal ?? []),
+    ]);
+    note('legal suffixes', legalLookup.from, legal.length === 0, legalMode);
 
     let street = streetTypes(definitions, chain);
     if (id === 'de' && street.types.length === 0) {
@@ -314,11 +392,41 @@ export function buildWordLists(definitions: Definitions): WordListBuild {
         from: id,
       };
     }
-    note('street types', street.from, street.types.length === 0);
+    if (id === 'tr' && street.types.length === 0) {
+      street = { ...turkishStreetTypes(definitions, chain), from: id };
+    }
+    let streetMode: 'none' | 'replaced' | 'added' = 'none';
+    const extraOrder = extra?.streetTypeOrder ?? 'after';
+    if (extra?.streetTypes !== undefined) {
+      if (street.types.length === 0) {
+        street = {
+          types: tidy(extra.streetTypes),
+          order: extraOrder,
+          from: null,
+        };
+        streetMode = 'replaced';
+      } else if (street.order === extraOrder) {
+        // Written the same way: the open data's types join Faker's.
+        street = {
+          ...street,
+          types: tidy([...street.types, ...extra.streetTypes]),
+        };
+        streetMode = 'added';
+      }
+    }
+    note('street types', street.from, street.types.length === 0, streetMode);
+
+    const streets = names(extra?.streets ?? []);
+    if (extra?.streets !== undefined)
+      note('street names', null, false, 'replaced');
 
     const cities = lookup(definitions, chain, ['location', 'city_name']);
-    const localities = tidy(stringList(cities.value));
-    note('localities', cities.from, localities.length === 0);
+    const cityMode = openMode(cities.from, extra?.localities !== undefined);
+    const localities = tidy([
+      ...(cityMode === 'replaced' ? [] : stringList(cities.value)),
+      ...(extra?.localities ?? []),
+    ]);
+    note('localities', cities.from, localities.length === 0, cityMode);
 
     const postcodeLookup = lookup(definitions, chain, ['location', 'postcode']);
     const postcodes = compressPostcodes(stringList(postcodeLookup.value));
@@ -336,6 +444,7 @@ export function buildWordLists(definitions: Definitions): WordListBuild {
       legal,
       streetTypes: street.types,
       streetTypeOrder: street.order,
+      streets,
       localities,
       postcodes,
     };
@@ -363,6 +472,7 @@ export function buildWordLists(definitions: Definitions): WordListBuild {
         family: familyAny.length + familyFemale.length + familyMale.length,
         legal: legal.length,
         streetTypes: street.types.length,
+        streets: streets.length,
         localities: localities.length,
         postcodes: postcodes.length,
       },

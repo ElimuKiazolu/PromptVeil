@@ -114,12 +114,18 @@ function planPerson(
     text: piece.text,
     role: roles[position] ?? 'given',
   }));
+  const locale = inferLocale(script, pieces, index, preferred);
   return {
     parsed,
     names,
     roles,
     cjkFamily: null,
-    locale: inferLocale(script, pieces, index, preferred),
+    // A Singaporean name written family first is a Chinese name ("Lim Boon
+    // Keng"): its stand-in is a Chinese name in pinyin.
+    locale:
+      locale === 'en_SG' && roles.length > 1 && roles[0] === 'family'
+        ? 'zh_Latn'
+        : locale,
   };
 }
 

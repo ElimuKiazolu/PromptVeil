@@ -1,0 +1,50 @@
+Open data in the stand-in word lists
+
+The names, places and street names PromptVeil uses for stand-ins come from
+the sources below. They are selected and shortened (most frequent or most
+populous first), not otherwise changed.
+
+Faker (https://fakerjs.dev): name, company and address lists of every
+locale. MIT License, see Faker-MIT.txt.
+
+Baby names in England and Wales: from 1996, Office for National Statistics
+https://www.ons.gov.uk/peoplepopulationandcommunity/birthsdeathsandmarriages/livebirths/datasets/babynamesinenglandandwalesfrom1996
+Used for: en_GB given names (girls' and boys' names by total count 1996-2025).
+Retrieved: 2026-11-20.
+Source: Office for National Statistics licensed under the Open Government Licence v.3.0.
+Licence: Open Government Licence v3.0 (https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/), see OGL-3.0.txt.
+
+OS Open Names, Ordnance Survey
+https://www.ordnancesurvey.co.uk/products/os-open-names
+Used for: en_GB localities (cities, towns, suburban areas, villages) and street names.
+Retrieved: 2026-11-20.
+Contains OS data © Crown copyright and database right 2026.
+Licence: Open Government Licence v3.0 (https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/), see OGL-3.0.txt.
+
+GeoNames gazetteer (cities1000, SG), GeoNames
+https://www.geonames.org/
+Used for: localities of pt_BR, nl, sv, ja and en_SG.
+Retrieved: 2026-11-20.
+Place names from GeoNames (www.geonames.org), licensed under CC BY 4.0; selected and shortened for the word lists.
+Licence: Creative Commons Attribution 4.0 International (https://creativecommons.org/licenses/by/4.0/), see CC-BY-4.0.txt.
+
+Master Plan 2019 Road Name layer, Urban Redevelopment Authority (data.gov.sg)
+https://data.gov.sg/datasets/d_93f8f9b3a463fc491b25d9a49f1dc654/view
+Used for: en_SG street names and street types.
+Retrieved: 2026-11-20.
+Contains information from Master Plan 2019 Road Name layer accessed on 2026-11-20 from data.gov.sg which is made available under the terms of the Singapore Open Data Licence version 1.0 https://data.gov.sg/open-data-licence.
+Licence: Singapore Open Data Licence version 1.0 (https://data.gov.sg/open-data-licence), see SODL-1.0.txt.
+
+Unihan Database 17.0.0 (kMandarin readings), Unicode, Inc.
+https://www.unicode.org/charts/unihan.html
+Used for: pinyin of Faker's Chinese names and cities (zh_Latn).
+Retrieved: 2026-11-20.
+Copyright © 1991-2026 Unicode, Inc. (Unicode License V3).
+Licence: Unicode License V3 (https://www.unicode.org/license.txt), see Unicode-3.0.txt.
+
+Wikidata (query service), Wikimedia Foundation and Wikidata contributors
+https://www.wikidata.org/
+Used for: family names of British, Brazilian and Singaporean people; given names of Brazilian and Singaporean people and of Malay and Tamil speakers; Singapore legal forms; Brazilian street types.
+Retrieved: 2026-11-20.
+Data from Wikidata (CC0).
+Licence: CC0 1.0 Universal (public domain dedication) (https://creativecommons.org/publicdomain/zero/1.0/), see CC0-1.0.txt.

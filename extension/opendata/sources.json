@@ -1,0 +1,247 @@
+{
+  "note": "Open data behind the stand-in word lists. npm run opendata:fetch downloads every file into opendata/raw/ (not committed) and checks it against the pinned SHA-256; npm run opendata:extract writes opendata/extracted/ (committed, checksums below); npm run generate:wordlists merges it with Faker's data into public/data/. Refresh with npm run opendata:fetch -- --update (new checksums and retrieval dates), then review the extracted lists.",
+  "sources": [
+    {
+      "id": "ons-baby-names",
+      "title": "Baby names in England and Wales: from 1996",
+      "publisher": "Office for National Statistics",
+      "page": "https://www.ons.gov.uk/peoplepopulationandcommunity/birthsdeathsandmarriages/livebirths/datasets/babynamesinenglandandwalesfrom1996",
+      "licence": "Open Government Licence v3.0",
+      "licenceUrl": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+      "attribution": "Source: Office for National Statistics licensed under the Open Government Licence v.3.0",
+      "use": "en_GB given names (girls' and boys' names by total count 1996-2025)",
+      "files": [
+        {
+          "name": "babynames1996to2025.xlsx",
+          "url": "https://www.ons.gov.uk/file?uri=/peoplepopulationandcommunity/birthsdeathsandmarriages/livebirths/datasets/babynamesinenglandandwalesfrom1996/1996to2025/babynames1996to2025.xlsx",
+          "retrieved": "2026-11-20",
+          "sha256": "bf7b10486ab20d0b32e4bc87385112f4555210f61e34eaac3574a0d8a658c0d4",
+          "bytes": 11972259
+        }
+      ]
+    },
+    {
+      "id": "os-open-names",
+      "title": "OS Open Names",
+      "publisher": "Ordnance Survey",
+      "page": "https://www.ordnancesurvey.co.uk/products/os-open-names",
+      "licence": "Open Government Licence v3.0",
+      "licenceUrl": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+      "attribution": "Contains OS data © Crown copyright and database right 2026",
+      "use": "en_GB localities (cities, towns, suburban areas, villages) and street names",
+      "files": [
+        {
+          "name": "opname_csv_gb.zip",
+          "url": "https://api.os.uk/downloads/v1/products/OpenNames/downloads?area=GB&format=CSV&redirect",
+          "retrieved": "2026-11-20",
+          "sha256": "81ee5ba2c96d8fe5ddbf83fb4f9928e8740563618c6c5eb9376280b399a74532",
+          "bytes": 103312081
+        }
+      ]
+    },
+    {
+      "id": "geonames",
+      "title": "GeoNames gazetteer (cities1000, SG)",
+      "publisher": "GeoNames",
+      "page": "https://www.geonames.org/",
+      "licence": "Creative Commons Attribution 4.0 International",
+      "licenceUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution": "Place names from GeoNames (www.geonames.org), licensed under CC BY 4.0; selected and shortened for the word lists",
+      "use": "localities of pt_BR, nl, sv, ja and en_SG",
+      "files": [
+        {
+          "name": "cities1000.zip",
+          "url": "https://download.geonames.org/export/dump/cities1000.zip",
+          "retrieved": "2026-11-20",
+          "sha256": "0770230481be281550b5dbea5da5bb1d090e56320eceef3643ea047f7cadf62f",
+          "bytes": 11101525
+        },
+        {
+          "name": "SG.zip",
+          "url": "https://download.geonames.org/export/dump/SG.zip",
+          "retrieved": "2026-11-20",
+          "sha256": "0fe293a3794ca5621e030c3155cd559bff1e83a3b92324828fa888c7cb0ab546",
+          "bytes": 69050
+        }
+      ]
+    },
+    {
+      "id": "ura-road-names",
+      "title": "Master Plan 2019 Road Name layer",
+      "publisher": "Urban Redevelopment Authority (data.gov.sg)",
+      "page": "https://data.gov.sg/datasets/d_93f8f9b3a463fc491b25d9a49f1dc654/view",
+      "licence": "Singapore Open Data Licence version 1.0",
+      "licenceUrl": "https://data.gov.sg/open-data-licence",
+      "attribution": "Contains information from Master Plan 2019 Road Name layer accessed on {retrieved} from data.gov.sg which is made available under the terms of the Singapore Open Data Licence version 1.0 https://data.gov.sg/open-data-licence",
+      "use": "en_SG street names and street types",
+      "files": [
+        {
+          "name": "ura-road-names.geojson",
+          "datagovsg": "d_93f8f9b3a463fc491b25d9a49f1dc654",
+          "retrieved": "2026-11-20",
+          "sha256": "5e9b7e7084caab35a5198dcbcc4b82f1e56e2722029b17dcf6f907b52d512fcd",
+          "bytes": 11819016
+        }
+      ]
+    },
+    {
+      "id": "unihan",
+      "title": "Unihan Database 17.0.0 (kMandarin readings)",
+      "publisher": "Unicode, Inc.",
+      "page": "https://www.unicode.org/charts/unihan.html",
+      "licence": "Unicode License V3",
+      "licenceUrl": "https://www.unicode.org/license.txt",
+      "attribution": "Copyright © 1991-2026 Unicode, Inc. (Unicode License V3)",
+      "use": "pinyin of Faker's Chinese names and cities (zh_Latn)",
+      "files": [
+        {
+          "name": "Unihan.zip",
+          "url": "https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip",
+          "retrieved": "2026-11-20",
+          "sha256": "f7a48b2b545acfaa77b2d607ae28747404ce02baefee16396c5d2d7a8ef34b5e",
+          "bytes": 8518517
+        }
+      ]
+    },
+    {
+      "id": "wikidata",
+      "title": "Wikidata (query service)",
+      "publisher": "Wikimedia Foundation and Wikidata contributors",
+      "page": "https://www.wikidata.org/",
+      "licence": "CC0 1.0 Universal (public domain dedication)",
+      "licenceUrl": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "attribution": "Data from Wikidata (CC0)",
+      "use": "family names of British, Brazilian and Singaporean people; given names of Brazilian and Singaporean people and of Malay and Tamil speakers; Singapore legal forms; Brazilian street types",
+      "files": [
+        {
+          "name": "family-gb.json",
+          "query": "family-gb.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "e6a57d27f71b515a1920c5f1a245f62d112c5f610051baa96db5b57623245a25",
+          "bytes": 515862
+        },
+        {
+          "name": "family-gb.labels.json",
+          "labelsOf": "family-gb.json",
+          "retrieved": "2026-11-20",
+          "sha256": "3b6bfc750026e16d0679e95d410da45c060f526113967326d8d1d2bab9213dfe",
+          "bytes": 2570257
+        },
+        {
+          "name": "family-br.json",
+          "query": "family-br.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "3596869cc41437d215ce109dd1563b891dc3a533034f6b97c1669559df3aadd3",
+          "bytes": 514608
+        },
+        {
+          "name": "family-br.labels.json",
+          "labelsOf": "family-br.json",
+          "retrieved": "2026-11-20",
+          "sha256": "cf5e8d19a53dd6d2fa1d5e08f0656f75949ad62796fde34482d4d4a1fb1be5cd",
+          "bytes": 2588199
+        },
+        {
+          "name": "given-br.json",
+          "query": "given-br.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "296f35d84dc4827fff081c77c854221ae11ee57aca0f5698152c12f98b2ea57a",
+          "bytes": 514616
+        },
+        {
+          "name": "given-br.labels.json",
+          "labelsOf": "given-br.json",
+          "retrieved": "2026-11-20",
+          "sha256": "2bb4cd3be1175f9d884295a4ddfa700fb98cd2b1e8ce55442570a094dee67b81",
+          "bytes": 2488744
+        },
+        {
+          "name": "family-sg.json",
+          "query": "family-sg.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "74807e4f5bb6347b59b50a330071e193c706d7c8e8462ee8662c88f2dda3c2fc",
+          "bytes": 129783
+        },
+        {
+          "name": "family-sg.labels.json",
+          "labelsOf": "family-sg.json",
+          "retrieved": "2026-11-20",
+          "sha256": "157785ed539672d7380364cbaf0a92bb1664c5de7a48ce5436f72140d04f472d",
+          "bytes": 620188
+        },
+        {
+          "name": "given-sg.json",
+          "query": "given-sg.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "dc572b900f274186daa4f4760fff7f5aa42e80cfa69c240ce48cece29dd6c522",
+          "bytes": 239650
+        },
+        {
+          "name": "given-sg.labels.json",
+          "labelsOf": "given-sg.json",
+          "retrieved": "2026-11-20",
+          "sha256": "f3596967894b0e008c172e4cf1a90abeaf53f8be74674a636788e499885082b3",
+          "bytes": 1121239
+        },
+        {
+          "name": "given-malay.json",
+          "query": "given-malay.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "3d772bcbd13ac1a1d515cf143f68eea8c41b5e95dbd600cc6f7b5ebe3bdbb5c6",
+          "bytes": 317218
+        },
+        {
+          "name": "given-malay.labels.json",
+          "labelsOf": "given-malay.json",
+          "retrieved": "2026-11-20",
+          "sha256": "452d3f5c6bc62bba76e1256bcf3c4674dabcf90e098a877487870f736d8c694e",
+          "bytes": 1372829
+        },
+        {
+          "name": "given-tamil.json",
+          "query": "given-tamil.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "8fedb284428c306cdb175a44c8984439b257d16210d42800e5ea7d4243ee4f2f",
+          "bytes": 67389
+        },
+        {
+          "name": "given-tamil.labels.json",
+          "labelsOf": "given-tamil.json",
+          "retrieved": "2026-11-20",
+          "sha256": "8eb8947a02342f19627085c69fb1fb8e323db9a1eccbfb286cb35461b6a75a33",
+          "bytes": 311123
+        },
+        {
+          "name": "legal-sg.json",
+          "query": "legal-sg.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "0dfbb8e027d2a5ebc0472a99620ec0febd2488b121fa66d2c948e5b5a9a50a8a",
+          "bytes": 9581
+        },
+        {
+          "name": "streets-br.json",
+          "query": "streets-br.rq",
+          "retrieved": "2026-11-20",
+          "sha256": "3ba92217c475c6b6c22b525858678df3b11bf78a65a0a7870eeffee2aab8a3d6",
+          "bytes": 103130
+        }
+      ]
+    }
+  ],
+  "skipped": [
+    {
+      "id": "gleif-elf",
+      "title": "ISO 20275 Entity Legal Forms code list (GLEIF)",
+      "reason": "CC0 not confirmed for the code list: GLEIF's CC0 terms cover LEIs and LEI reference data of the Global LEI Repository; the ELF page states no licence (checked 2026-11-20)."
+    }
+  ],
+  "extracted": {
+    "en_GB.json": "b6bf376193388299328234e993f8e535bf9f2d1f5a443926ebffd7e86815a992",
+    "pt_BR.json": "68ad75b03883cf01be3845c277492e3d3447a3e259fb82574110fae8224c38f2",
+    "en_SG.json": "74d16b140c68d4cd3f2d83702a9b3fdd861921c6ea9360bdcc40da894e745764",
+    "zh_Latn.json": "4671d382b778717582ca19d167d90c4b3d1a505b47c19fc18025de788aaff4eb",
+    "nl.json": "102f94a6fab1202c68bc136c6aae1e009354db7543a403b8a0d73e698715b839",
+    "sv.json": "2ac9e91803b8cd54dafc8bc0414f040fe8f2907b0e5643d0ceaec95d96e1186b",
+    "ja.json": "fb74d37714a2da20ab897c6687eb1e66019877b1d08c67b275badf757460ae08"
+  }
+}

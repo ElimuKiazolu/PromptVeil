@@ -229,3 +229,49 @@ describe('dates of birth in the vault', () => {
     ]);
   });
 });
+
+describe('names with the open-data locales in the vault', () => {
+  it('store the locale and stand-in parts, and keep the real names out of the plaintext', async () => {
+    // Common names of their countries (list data), fictional people.
+    const PINYIN = realValue({
+      type: 'PERSON',
+      subtype: null,
+      country: null,
+      value: 'Wang Wei',
+    });
+    const SINGAPOREAN = realValue({
+      type: 'PERSON',
+      subtype: null,
+      country: null,
+      value: 'Siti Fauziah',
+    });
+    const context = await readyContext();
+    await prepareMask(context, {
+      conversationId: CONV,
+      site: 'chatgpt',
+      status: 'active',
+      items: [PINYIN, SINGAPOREAN],
+    });
+    await commitMask(context, CONV, [
+      entry(PINYIN, 'Zhang Jie', {
+        variants: ['Zhang', 'Jie'],
+        locale: 'zh_Latn',
+      }),
+      entry(SINGAPOREAN, 'Nur Insyirah', {
+        variants: ['Nur', 'Insyirah'],
+        locale: 'en_SG',
+      }),
+    ]);
+    const dump = await dumpAll(context.db);
+    const forms = [PINYIN, SINGAPOREAN].flatMap(needles);
+    forms.push('Wang', 'Siti', 'Fauziah');
+    for (const store of [STORE.mappings, STORE.conversations, STORE.log]) {
+      expect(findPlaintext(dump.get(store), forms)).toEqual([]);
+    }
+    const loaded = await loadConversation(context, CONV);
+    expect(loaded.entries.map((e) => [e.real, e.locale]).sort()).toEqual([
+      ['Siti Fauziah', 'en_SG'],
+      ['Wang Wei', 'zh_Latn'],
+    ]);
+  });
+});

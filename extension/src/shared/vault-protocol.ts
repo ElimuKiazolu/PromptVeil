@@ -32,7 +32,8 @@ export const MAX_VALUE_LENGTH = 4096;
 
 /** Most variants per mapping, and the longest locale id. */
 export const MAX_VARIANTS = 16;
-const LOCALE_ID = /^[a-z]{2}(?:_[A-Z]{2})?$/u;
+/** A word-list locale: language, then a region or a script (zh_Latn). */
+const LOCALE_ID = /^[a-z]{2}(?:_(?:[A-Z]{2}|[A-Z][a-z]{3}))?$/u;
 
 /** Longest conversation ID accepted in a message. */
 const MAX_CONVERSATION_ID_LENGTH = 256;
