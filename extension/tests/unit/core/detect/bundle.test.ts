@@ -11,7 +11,7 @@ const immediate: Yielder = { now: () => 0, yieldNow: () => Promise.resolve() };
 
 describe('detection module entry', () => {
   it('has the interface version the content script checks', () => {
-    expect(DETECTION_API_VERSION).toBe(6);
+    expect(DETECTION_API_VERSION).toBe(7);
   });
 
   it('detects with the configured types and packs, honouring idPacks', async () => {
@@ -39,6 +39,30 @@ describe('detection module entry', () => {
     runtime.clear();
     runtime.dispose();
     await expect(runtime.analyse('x')).rejects.toThrow();
+  });
+
+  it('scans saved text with its own cache, leaving the draft cache alone', async () => {
+    const runtime = createDetection(
+      {
+        homeRegions: ['GB'],
+        preferredRegions: [],
+        entityTypes: new Set(['EMAIL']),
+        idPacks: {},
+        keepCity: true,
+        maskPrivateIps: false,
+      },
+      immediate,
+    );
+    const draft = await runtime.analyse('draft for dana@example.com');
+    const saved = await runtime.scan('saved text 0');
+    for (let i = 1; i < 20; i += 1) {
+      await runtime.scan(`saved text ${String(i)}`);
+    }
+    // The same result objects: both came from their caches.
+    expect(await runtime.analyse('draft for dana@example.com')).toBe(draft);
+    expect(await runtime.scan('saved text 0')).toBe(saved);
+    runtime.clear();
+    expect(await runtime.scan('saved text 0')).not.toBe(saved);
   });
 
   it('gives the vault normal form of a detection', async () => {

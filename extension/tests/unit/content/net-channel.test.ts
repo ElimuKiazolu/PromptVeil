@@ -1,27 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chatgptNetRules } from '@/src/adapters/chatgpt.ts';
-import { startNetBridge } from '@/src/content/net-bridge.ts';
+import {
+  startNetBridge,
+  type VerifierResult,
+} from '@/src/content/net-bridge.ts';
 import type { StandInMapping } from '@/src/core/restore/index.ts';
 import { startMainChannel } from '@/src/net/channel.ts';
 import { installNetGuard, VERIFY_TIMEOUT_MS } from '@/src/net/guard.ts';
-import type { NetWindow } from '@/src/net/wrappers.ts';
+import {
+  documentAtStart,
+  fakeWindow,
+  NINO,
+  pageScriptsMayRun,
+} from './net-fakes.ts';
 import {
   NET_KEY_OFFER,
   NET_MAIN_HELLO,
   type NetAddition,
 } from '@/src/shared/net-protocol.ts';
-
-/** A document as it is at document_start: no element besides the root. */
-function documentAtStart(): Document {
-  const doc = document.implementation.createHTMLDocument('');
-  doc.documentElement.replaceChildren();
-  return doc;
-}
-
-/** The parser has created elements: page scripts may run from now on. */
-function pageScriptsMayRun(doc: Document): void {
-  doc.documentElement.append(doc.createElement('head'));
-}
 
 const DANA: StandInMapping = {
   standIn: 'standin.1@example.net',
@@ -31,6 +27,8 @@ const DANA: StandInMapping = {
 
 const VALID_KEY = 'ab'.repeat(32);
 
+const PASS: VerifierResult = { block: false, possible: 0 };
+
 /** MAIN-channel handlers that do nothing, with a real timer. */
 function handlers() {
   return {
@@ -39,64 +37,6 @@ function handlers() {
     setTimer: (handler: () => void, ms: number) => {
       setTimeout(handler, ms);
     },
-  };
-}
-
-// HMRC's tutorial NINO, masked: the net looks for its compact form.
-const NINO: StandInMapping = {
-  standIn: 'TN 48 21 93 B',
-  real: 'AB 12 34 56 C',
-  boundary: 'word',
-  netForms: ['ab123456c'],
-};
-
-function fakeWindow() {
-  const sent: string[] = [];
-  /** What each fake transport was given, in order. */
-  const payloads: unknown[] = [];
-  class FakeXhr extends EventTarget {
-    opened: [string, string] | null = null;
-    open(method: string, url: string): void {
-      this.opened = [method, url];
-    }
-    send(body?: unknown): void {
-      payloads.push(body);
-      sent.push('xhr');
-    }
-  }
-  class FakeWebSocket extends EventTarget {
-    url = 'wss://chatgpt.com/socket';
-    send(data?: unknown): void {
-      payloads.push(data);
-      sent.push('ws');
-    }
-  }
-  class FakeNavigator {
-    sendBeacon(url: string | URL, data?: unknown): boolean {
-      payloads.push([url, data]);
-      sent.push('beacon');
-      return true;
-    }
-  }
-  const win = {
-    fetch: () => {
-      sent.push('fetch');
-      return Promise.resolve(new Response('ok'));
-    },
-    XMLHttpRequest: FakeXhr,
-    WebSocket: FakeWebSocket,
-    Navigator: FakeNavigator,
-    navigator: new FakeNavigator(),
-    ProgressEvent: Event,
-    location: { href: 'https://chatgpt.com/c/abc' },
-    setTimeout: (handler: () => void, ms?: number) => setTimeout(handler, ms),
-    performance: { now: () => performance.now() },
-  };
-  return {
-    win: win as unknown as NetWindow & { performance: { now(): number } },
-    sent,
-    FakeXhr,
-    FakeNavigator,
   };
 }
 
@@ -263,7 +203,7 @@ describe('installNetGuard', () => {
     installNetGuard(env.win, doc, chatgptNetRules);
     const bridge = startNetBridge(doc);
     // The detector finds nothing to mask in any message, by default.
-    bridge.setVerifier(() => Promise.resolve(false));
+    bridge.setVerifier(() => Promise.resolve(PASS));
     pageScriptsMayRun(doc);
     return { ...env, doc, bridge };
   }
@@ -338,10 +278,10 @@ describe('installNetGuard', () => {
     expect(sent).toEqual(['beacon']);
   });
 
-  it('tier 2 leaves other emails alone, such as the account email', async () => {
+  it('tier 2 leaves other emails alone in requests to other sites', async () => {
     const { win, sent, bridge } = setUpGuard();
     bridge.sync([DANA]);
-    await win.fetch('https://chatgpt.com/backend-api/settings', {
+    await win.fetch('https://telemetry.example/settings', {
       method: 'POST',
       body: '{"email":"me@example.org"}',
     });
@@ -396,7 +336,10 @@ describe('installNetGuard', () => {
     const asked: string[][] = [];
     bridge.setVerifier((texts) => {
       asked.push([...texts]);
-      return Promise.resolve(texts.some((t) => t.includes('AB 12 34 56 C')));
+      return Promise.resolve({
+        block: texts.some((t) => t.includes('AB 12 34 56 C')),
+        possible: 0,
+      });
     });
     await expect(
       win.fetch('/backend-api/f/conversation', {
@@ -409,9 +352,10 @@ describe('installNetGuard', () => {
       body: messageBody('My NI number is TN 48 21 93 B'),
     });
     expect(sent).toEqual(['fetch']);
-    // Only the message text fields, not the rest of the body.
+    // Only the user's text, not the rest of the body.
     expect(asked.flat()).toContain('My NI number is AB 12 34 56 C');
     expect(asked.flat()).not.toContain('next');
+    expect(asked.flat()).not.toContain('user');
   });
 
   it('blocks a fetch message request without a verifier or when it fails', async () => {
@@ -441,7 +385,7 @@ describe('installNetGuard', () => {
     vi.useFakeTimers();
     try {
       const { win, sent, bridge } = setUpGuard();
-      bridge.setVerifier(() => new Promise<boolean>(() => undefined));
+      bridge.setVerifier(() => new Promise<VerifierResult>(() => undefined));
       const request = win.fetch('/backend-api/f/conversation', {
         method: 'POST',
         body: messageBody('hello'),

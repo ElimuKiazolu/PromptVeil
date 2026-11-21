@@ -51,18 +51,50 @@ export interface SiteAdapter {
   isReplyComplete?(container: HTMLElement): boolean;
 }
 
+/** A site surface whose writes carry text the user typed. */
+export type WriteSurface = 'message' | 'writing-block';
+
 /**
- * How the request safety net recognises a site's message requests. Pure
+ * A write endpoint the adapter knows exactly: which request it is and where
+ * in the body the user's text is.
+ */
+export interface NetEndpoint {
+  readonly surface: WriteSurface;
+  matches(url: URL, method: string): boolean;
+  /**
+   * The user's text in a parsed body, or null when the body does not have
+   * the expected shape (then the free-text selection checks it).
+   */
+  userTexts(body: unknown): string[] | null;
+  /** Dot paths of nested objects whose key names the dev log shows. */
+  readonly loggedObjects: readonly string[];
+}
+
+/**
+ * A first-party write known to carry no user text. Every entry is exact
+ * (one path and method) and documents the evidence in a comment; it never
+ * depends on anything the page controls. Tier 2 still checks it.
+ */
+export interface NetSkip {
+  matches(url: URL, method: string): boolean;
+}
+
+/**
+ * How the request safety net reads a site's requests. Pure data and
  * functions: the MAIN-world net uses them without any page DOM.
+ *
+ * Every first-party write (a request that sends data to the site itself)
+ * is checked for text the user typed: known endpoints by their extractor,
+ * any other by the free-text selection (src/core/net/user-text.ts), so a
+ * new site feature is checked from the day it appears.
  */
 export interface SiteNetRules {
-  /** True for the request(s) that send prompt text to the chatbot. */
-  isMessageEndpoint(url: URL, method: string): boolean;
-  /**
-   * The user's message text in a parsed message-request body, or null when
-   * the body does not have the expected shape (then all text is checked).
-   */
-  messageTexts(body: unknown): string[] | null;
+  /** True for a request that sends data to the site itself. */
+  isFirstPartyWrite(url: URL, method: string): boolean;
+  /** Known endpoints, tried in order. */
+  readonly endpoints: readonly NetEndpoint[];
+  /** First-party writes known to carry no user text. */
+  readonly skip: readonly NetSkip[];
 }
 
 export type AdapterErrorCode =

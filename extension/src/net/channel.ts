@@ -11,14 +11,23 @@ import {
 } from '@/src/shared/net-protocol.ts';
 import { originalFunction } from './wrappers.ts';
 
+/** The isolated side's answer on the user's text of a write. */
+export interface VerifyOutcome {
+  readonly block: boolean;
+  /** "possible" values found (logged only). */
+  readonly possible: number;
+}
+
+const NO_ANSWER: VerifyOutcome = { block: true, possible: 0 };
+
 export interface MainChannel {
   /** Sends a report to the isolated side; dropped before the handshake. */
   report(report: NetReport): void;
   /**
-   * Asks the isolated side whether message text may be sent. Resolves false
-   * (block) without an answer within `timeoutMs`, or before the handshake.
+   * Asks the isolated side whether the user's text may be sent. Blocks
+   * without an answer within `timeoutMs`, or before the handshake.
    */
-  verify(texts: readonly string[], timeoutMs: number): Promise<boolean>;
+  verify(texts: readonly string[], timeoutMs: number): Promise<VerifyOutcome>;
 }
 
 export interface MainChannelHandlers {
@@ -49,7 +58,7 @@ export function startMainChannel(
 
   let key: string | null = null;
   let nextId = 0;
-  const pending = new Map<number, (allowed: boolean) => void>();
+  const pending = new Map<number, (outcome: VerifyOutcome) => void>();
 
   const onAdd = (event: Event): void => {
     if (!(event instanceof CustomEventCtor)) return;
@@ -63,7 +72,7 @@ export function startMainChannel(
     if (!verdict) return;
     const settle = pending.get(verdict.id);
     pending.delete(verdict.id);
-    settle?.(!verdict.block);
+    settle?.({ block: verdict.block, possible: verdict.possible });
   };
 
   const onOffer = (event: Event): void => {
@@ -96,13 +105,13 @@ export function startMainChannel(
       );
     },
     verify(texts, timeoutMs) {
-      if (key === null) return Promise.resolve(false);
+      if (key === null) return Promise.resolve(NO_ANSWER);
       const id = nextId;
       nextId += 1;
-      const answer = new Promise<boolean>((resolve) => {
+      const answer = new Promise<VerifyOutcome>((resolve) => {
         pending.set(id, resolve);
         handlers.setTimer(() => {
-          if (pending.delete(id)) resolve(false);
+          if (pending.delete(id)) resolve(NO_ANSWER);
         }, timeoutMs);
       });
       dispatch.call(

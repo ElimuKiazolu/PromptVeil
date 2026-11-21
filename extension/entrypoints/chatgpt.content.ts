@@ -14,6 +14,7 @@ import { loadWordList } from '@/src/content/word-lists.ts';
 import { createMainThreadYielder } from '@/src/content/yielder.ts';
 import { createCheckpoint } from '@/src/core/detect/schedule.ts';
 import type { DetectionConfig } from '@/src/core/detect/bundle.ts';
+import { checkUserTexts } from '@/src/core/net/write-check.ts';
 import { createPipeline, needsMasking } from '@/src/core/pipeline.ts';
 import {
   regionsFromLanguages,
@@ -150,21 +151,19 @@ export default defineContentScript({
         }
       },
     });
-    // Message requests sent with fetch: the net asks whether their text
-    // holds a value a send would have masked.
+    // First-party writes sent with fetch: the net asks whether the user's
+    // text in them holds a value a send would have masked.
     net.setVerifier(async (texts) => {
       // Waits for the module like a send does; a load failure blocks.
       const runtime = await detection.ready();
-      for (const text of texts) {
-        const detections = await runtime.analyse(text);
-        const unmasked = detections.some((found) =>
+      return checkUserTexts(texts, {
+        scan: (text) => runtime.scan(text),
+        needsMasking: (found) =>
           needsMasking(found, current.entityTypes, (value) =>
             session.isIssued(value),
           ),
-        );
-        if (unmasked) return true;
-      }
-      return false;
+        isMaskedType: (found) => current.entityTypes.has(found.type),
+      });
     });
     startInstance({
       adapter,

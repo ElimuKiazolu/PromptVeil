@@ -1,5 +1,5 @@
 import type { NetTransport } from '@/src/shared/net-protocol.ts';
-import { readBodySync, readFetchBody } from './body.ts';
+import { readBodySync, readFetchBody, type BodyCodecs } from './body.ts';
 import { parseRequestUrl, type DescribedRequest } from './request.ts';
 
 /** The page globals the net wraps. */
@@ -98,7 +98,11 @@ function installGuard(
  * fetch rejects, XHR fires error, a WebSocket message is dropped, a beacon
  * returns false.
  */
-export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
+export function wrapNetwork(
+  win: NetWindow,
+  codecs: BodyCodecs,
+  allow: AllowRequest,
+): void {
   const base = (): string => win.location.href;
 
   installGuard(
@@ -118,9 +122,10 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
               : input;
         const request: DescribedRequest = {
           url: parseRequestUrl(raw, base()),
-          method:
-            init?.method ?? (input instanceof Request ? input.method : 'GET'),
-          body: await readFetchBody(input, init),
+          method: (
+            init?.method ?? (input instanceof Request ? input.method : 'GET')
+          ).toUpperCase(),
+          body: await readFetchBody(input, init, codecs),
         };
         if (!(await allow(request, 'fetch'))) {
           throw new TypeError('Failed to fetch');
@@ -142,7 +147,7 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
       function guardedOpen(this: XMLHttpRequest, ...args: unknown[]): unknown {
         const [method, url] = args;
         opened.set(this, {
-          method: typeof method === 'string' ? method : 'GET',
+          method: typeof method === 'string' ? method.toUpperCase() : 'GET',
           url: url instanceof URL ? url.href : String(url),
         });
         return Reflect.apply(impl, this, args) as unknown;
@@ -160,7 +165,7 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
         const request: DescribedRequest = {
           url: target ? parseRequestUrl(target.url, base()) : null,
           method: target?.method ?? 'GET',
-          body: readBodySync(body),
+          body: readBodySync(body, codecs),
         };
         if (allow(request, 'xhr') !== true) {
           // Report it the way a network failure would be reported.
@@ -185,7 +190,7 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
         const request: DescribedRequest = {
           url: parseRequestUrl(this.url, base()),
           method: 'SEND',
-          body: readBodySync(data),
+          body: readBodySync(data, codecs),
         };
         // A blocked message is dropped; closing the socket could make the page
         // reconnect and resend it.
@@ -203,7 +208,7 @@ export function wrapNetwork(win: NetWindow, allow: AllowRequest): void {
       const request: DescribedRequest = {
         url: parseRequestUrl(url instanceof URL ? url.href : url, base()),
         method: 'POST',
-        body: readBodySync(data),
+        body: readBodySync(data, codecs),
       };
       if (allow(request, 'beacon') !== true) return false;
       return Reflect.apply(impl, this ?? win.navigator, [url, data]) === true;

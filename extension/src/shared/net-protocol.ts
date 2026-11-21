@@ -13,8 +13,8 @@
  * Operations are additive only: nothing can turn the net off or remove what
  * it blocks.
  *
- * Message requests sent with fetch are also verified by the isolated side:
- * the net sends the message text fields ('verify') and waits for a verdict
+ * First-party writes sent with fetch are also verified by the isolated side:
+ * the net sends the user's text ('verify') and waits for a verdict
  * ('verdict'); no verdict in time blocks the request.
  */
 import { HASH_KEY_PATTERN } from '@/src/core/net/hash.ts';
@@ -62,7 +62,7 @@ export interface NetAddition {
   standIns: string[];
 }
 
-/** Message text the net asks the isolated side to verify. */
+/** User text the net asks the isolated side to verify. */
 export interface NetVerifyRequest {
   id: number;
   texts: string[];
@@ -72,6 +72,8 @@ export interface NetVerdict {
   id: number;
   /** True when the text holds a value that should have been masked. */
   block: boolean;
+  /** "possible" values found (logged only, never blocked). */
+  possible: number;
 }
 
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
@@ -153,15 +155,56 @@ export function parseVerdict(detail: unknown): NetVerdict | null {
   if (
     record === null ||
     !isWholeNumber(record.id, 0, Number.MAX_SAFE_INTEGER) ||
-    typeof record.block !== 'boolean'
+    typeof record.block !== 'boolean' ||
+    !isWholeNumber(record.possible, 0, MAX_ITEMS)
   ) {
     return null;
   }
-  return { id: record.id as number, block: record.block };
+  return {
+    id: record.id as number,
+    block: record.block,
+    possible: record.possible as number,
+  };
 }
 
 export type NetTransport = 'fetch' | 'xhr' | 'websocket' | 'beacon';
-export type NetCategory = 'message' | 'other';
+/**
+ * Known first-party surfaces ('message', 'writing-block'), any other
+ * first-party write ('write'), or a request that is not one ('other').
+ */
+export type NetCategory = 'message' | 'writing-block' | 'write' | 'other';
+
+/** Why a request body (or part of it) was not read (src/net/body.ts). */
+export type NetSkipReason =
+  | 'binary'
+  | 'compressed'
+  | 'corrupt'
+  | 'too-large'
+  | 'blob'
+  | 'stream'
+  | 'file';
+
+/** How much of a first-party write's user text was checked. */
+export type NetWriteCheck = 'full' | 'sync' | 'skipped';
+export type NetWriteResult = 'pass' | 'block' | 'possible';
+
+/**
+ * A first-party write for the dev log: no values, only the method, the
+ * path with IDs replaced, key names and what the net did.
+ */
+export interface NetWriteReport {
+  event: 'net.write';
+  method: string;
+  path: string;
+  transport: NetTransport;
+  category: NetCategory;
+  /** Key names of the body ("writing_block.metadata.subject"). */
+  fields: string[];
+  /** The body as read: json, text, form, gzip-json, binary, none, … */
+  body: string;
+  checked: NetWriteCheck;
+  result: NetWriteResult;
+}
 
 /** What the net reports back; fixed codes only, never request content. */
 export type NetReport =
@@ -175,16 +218,76 @@ export type NetReport =
       event: 'net.skipped-binary';
       category: NetCategory;
       transport: NetTransport;
+      reason: NetSkipReason;
     }
   | { event: 'net.checked'; category: NetCategory; transport: NetTransport }
   | { event: 'net.failed'; category: NetCategory; transport: NetTransport }
   /** How many masked-value forms the net now holds (diagnostic). */
   | { event: 'net.added'; count: number }
-  /** A message request verified by the isolated side: added time, outcome. */
-  | { event: 'net.verified'; ms: number; block: boolean };
+  /** A write verified by the isolated side: added time, outcome. */
+  | { event: 'net.verified'; ms: number; block: boolean }
+  | NetWriteReport;
 
 const TRANSPORTS: readonly string[] = ['fetch', 'xhr', 'websocket', 'beacon'];
-const CATEGORIES: readonly string[] = ['message', 'other'];
+const CATEGORIES: readonly string[] = [
+  'message',
+  'writing-block',
+  'write',
+  'other',
+];
+const SKIP_REASONS: readonly string[] = [
+  'binary',
+  'compressed',
+  'corrupt',
+  'too-large',
+  'blob',
+  'stream',
+  'file',
+];
+const WRITE_CHECKS: readonly string[] = ['full', 'sync', 'skipped'];
+const WRITE_RESULTS: readonly string[] = ['pass', 'block', 'possible'];
+
+/** What may appear in a net.write report (never values). */
+const LOGGED_METHOD = /^[A-Z]{1,10}$/;
+const LOGGED_PATH = /^[A-Za-z0-9/:_.-]{0,512}$/;
+const LOGGED_FIELD = /^[A-Za-z0-9_.?-]{1,120}$/;
+const LOGGED_BODY = /^[a-z-]{1,40}$/;
+const MAX_FIELDS = 40;
+
+function parseWriteReport(
+  r: Record<string, unknown>,
+  base: { transport: NetTransport; category: NetCategory },
+): NetWriteReport | null {
+  const { method, path, body, checked, result } = r;
+  const fields = stringArray(r.fields);
+  if (
+    typeof method !== 'string' ||
+    !LOGGED_METHOD.test(method) ||
+    typeof path !== 'string' ||
+    !LOGGED_PATH.test(path) ||
+    typeof body !== 'string' ||
+    !LOGGED_BODY.test(body) ||
+    typeof checked !== 'string' ||
+    !WRITE_CHECKS.includes(checked) ||
+    typeof result !== 'string' ||
+    !WRITE_RESULTS.includes(result) ||
+    fields === null ||
+    fields.length > MAX_FIELDS ||
+    !fields.every((field) => LOGGED_FIELD.test(field))
+  ) {
+    return null;
+  }
+  return {
+    event: 'net.write',
+    method,
+    path,
+    ...base,
+    fields,
+    body,
+    checked: checked as NetWriteCheck,
+    result: result as NetWriteResult,
+  };
+}
 
 export function parseReport(detail: unknown): NetReport | null {
   const r = parseObject(detail);
@@ -217,8 +320,17 @@ export function parseReport(detail: unknown): NetReport | null {
   if (r.event === 'net.blocked' && (r.tier === 1 || r.tier === 2)) {
     return { event: 'net.blocked', tier: r.tier, ...base };
   }
-  if (r.event === 'net.skipped-binary')
-    return { event: 'net.skipped-binary', ...base };
+  if (r.event === 'net.skipped-binary') {
+    const { reason } = r;
+    return typeof reason === 'string' && SKIP_REASONS.includes(reason)
+      ? {
+          event: 'net.skipped-binary',
+          ...base,
+          reason: reason as NetSkipReason,
+        }
+      : null;
+  }
+  if (r.event === 'net.write') return parseWriteReport(r, base);
   if (r.event === 'net.checked') return { event: 'net.checked', ...base };
   if (r.event === 'net.failed') return { event: 'net.failed', ...base };
   return null;

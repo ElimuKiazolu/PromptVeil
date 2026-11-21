@@ -6,6 +6,13 @@
  * never its message. Production builds compile every call away.
  */
 
+import type {
+  NetCategory,
+  NetSkipReason,
+  NetTransport,
+  NetWriteCheck,
+  NetWriteResult,
+} from './net-protocol.ts';
 import type { VaultFailureCode } from './vault-protocol.ts';
 
 export type DevEvent =
@@ -34,6 +41,7 @@ export type DevEvent =
   | 'net.synced'
   | 'net.added'
   | 'net.verified'
+  | 'net.write'
   | 'message.rejected'
   | 'message.failed'
   | 'prepass.failed'
@@ -110,8 +118,22 @@ export interface DevDetails {
   count?: number;
   /** Request safety net: which check blocked, and what kind of request. */
   tier?: 1 | 2;
-  category?: 'message' | 'other';
-  transport?: 'fetch' | 'xhr' | 'websocket' | 'beacon';
+  category?: NetCategory;
+  transport?: NetTransport;
+  /** Why a request body was not read. */
+  skip?: NetSkipReason;
+  /**
+   * A first-party write (net.write): method, path with IDs replaced, key
+   * names, body kind, how it was checked and the outcome. Never values.
+   */
+  write?: {
+    method: string;
+    path: string;
+    fields: readonly string[];
+    body: string;
+    checked: NetWriteCheck;
+    result: NetWriteResult;
+  };
   /** Vault failure code. */
   vault?: VaultFailureCode;
   /** A duration in ms (e.g. a message request's verification). */
@@ -146,6 +168,18 @@ export function devlog(event: DevEvent, details: DevDetails = {}): void {
   }
   if (details.transport !== undefined) {
     parts.push(`transport=${details.transport}`);
+  }
+  if (details.skip !== undefined) parts.push(`skip=${details.skip}`);
+  if (details.write !== undefined) {
+    const w = details.write;
+    parts.push(
+      `method=${w.method}`,
+      `path=${w.path}`,
+      `fields=${w.fields.join(',')}`,
+      `body=${w.body}`,
+      `checked=${w.checked}`,
+      `result=${w.result}`,
+    );
   }
   if (details.vault !== undefined) parts.push(`vault=${details.vault}`);
   if (details.ms !== undefined) parts.push(`ms=${ms(details.ms)}`);

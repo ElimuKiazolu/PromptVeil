@@ -4,6 +4,7 @@ import { chatgptNetRules } from '@/src/adapters/chatgpt.ts';
 import { requestTexts } from '@/src/net/request.ts';
 import {
   collectJsonStrings,
+  compactForms,
   decideRequest,
   parseJsonText,
   violatesTier1,
@@ -236,21 +237,14 @@ describe('tier 2: known real values anywhere', () => {
 });
 
 describe('decideRequest', () => {
-  it('applies tier 1 only to message endpoints', () => {
+  it('applies tier 1 only to the user text of first-party writes', () => {
     const k = knowledge();
+    expect(decideRequest({ all: ['dana@example.com'], user: null }, k)).toEqual(
+      { block: false },
+    );
     expect(
       decideRequest(
-        { all: ['dana@example.com'], message: null, messageParts: null },
-        k,
-      ),
-    ).toEqual({ block: false });
-    expect(
-      decideRequest(
-        {
-          all: ['dana@example.com'],
-          message: ['dana@example.com'],
-          messageParts: ['dana@example.com'],
-        },
+        { all: ['dana@example.com'], user: ['dana@example.com'] },
         k,
       ),
     ).toEqual({ block: true, tier: 1 });
@@ -259,11 +253,7 @@ describe('decideRequest', () => {
   it('applies tier 2 to every request', () => {
     expect(
       decideRequest(
-        {
-          all: ['https://x.example/?e=dana@example.com'],
-          message: null,
-          messageParts: null,
-        },
+        { all: ['https://x.example/?e=dana@example.com'], user: null },
         knowledge(['dana@example.com']),
       ),
     ).toEqual({ block: true, tier: 2 });
@@ -274,12 +264,19 @@ describe('decideRequest', () => {
       decideRequest(
         {
           all: ['write to standin.1@example.net'],
-          message: ['write to standin.1@example.net'],
-          messageParts: ['write to standin.1@example.net'],
+          user: ['write to standin.1@example.net'],
         },
         knowledge(['dana@example.com'], ['standin.1@example.net']),
       ),
     ).toEqual({ block: false });
+  });
+});
+
+describe('compactForms', () => {
+  it('adds the unescaped form only when it differs', () => {
+    expect(compactForms('07400 123456')).toEqual(['07400123456']);
+    expect(compactForms('a &amp; b')).toEqual(['aampb', 'ab']);
+    expect(compactForms('a & b')).toEqual(['ab']);
   });
 });
 
@@ -298,7 +295,7 @@ describe('tier 2 on decoded request text', () => {
       {
         url: new URL(url),
         method: 'POST',
-        body: { texts, skippedBinary: false },
+        body: { texts, skipped: null, encoding: null, form: false },
       },
       chatgptNetRules,
     );
@@ -326,5 +323,50 @@ describe('tier 2 on decoded request text', () => {
       '{"v":"standin"}',
     );
     expect(violatesTier2(clean.all, k)).toBe(false);
+  });
+});
+
+describe('tier 2 on text the site escaped', () => {
+  // Published example values (libphonenumber, HMRC tutorial NINO, SWIFT
+  // registry IBAN, Braintree test card) and a fictional address.
+  const SPACED: Masked[] = [
+    { type: 'PHONE', country: 'GB', value: '07400 123456' },
+    {
+      type: 'NATIONAL_ID',
+      subtype: 'UK_NINO',
+      country: 'GB',
+      value: 'AB 12 34 56 C',
+    },
+    { type: 'BANK', subtype: 'IBAN', value: 'GB82 WEST 1234 5698 7654 32' },
+    { type: 'CARD', value: '4111 1111 1111 1111' },
+    { type: 'ADDRESS', value: '221B Baker Street, London NW1 6XE' },
+  ];
+  const SPACES = ['&#x20;', '&#32;', '&nbsp;', '&#xA0;', '\u00a0', '\u202f'];
+
+  /** How ChatGPT saves markdown: spaces as entities, punctuation escaped. */
+  const escapeLike = (value: string, space: string): string =>
+    value.replace(/ /gu, space).replace(/[.,\-_@]/gu, (c) => `\\${c}`);
+
+  it.each(SPACED)('blocks $type $value written with entities', (masked) => {
+    const k = knowledge([masked]);
+    for (const space of SPACES) {
+      const content = `Note: ${escapeLike(masked.value, space)} thanks`;
+      const body = JSON.stringify({ writing_block: { content } });
+      expect(violatesTier2([body, content], k), space).toBe(true);
+    }
+  });
+
+  it('blocks a masked email in markdown-escaped form', () => {
+    const k = knowledge(['robin_hale@example.com']);
+    expect(
+      violatesTier2([String.raw`Write to robin\_hale\@example\.com`], k),
+    ).toBe(true);
+  });
+
+  it('passes escaped text without the values', () => {
+    const k = knowledge(SPACED);
+    expect(
+      violatesTier2(['Dear&#x20;team,&nbsp;the\\-plan&#x20;is&#x20;below'], k),
+    ).toBe(false);
   });
 });

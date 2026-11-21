@@ -7,13 +7,42 @@ import {
 import { createFormHasher, normaliseValue } from '@/src/core/net/hash.ts';
 import { createRollingHash, rollingBase } from '@/src/core/net/rolling.ts';
 import { isSpikeStandIn } from '@/src/core/spike-standin.ts';
-import type { NetCategory, NetTransport } from '@/src/shared/net-protocol.ts';
+import type {
+  NetCategory,
+  NetTransport,
+  NetWriteCheck,
+  NetWriteResult,
+} from '@/src/shared/net-protocol.ts';
+import { captureCodecs, type BodyContent, type CodecGlobals } from './body.ts';
 import { startMainChannel } from './channel.ts';
-import { requestTexts, type DescribedRequest } from './request.ts';
+import {
+  loggedPath,
+  requestTexts,
+  type DescribedRequest,
+  type WriteDescription,
+} from './request.ts';
 import { originalFunction, wrapNetwork, type NetWindow } from './wrappers.ts';
 
-/** Longest wait for the isolated side's verdict on a message request. */
+/** Longest wait for the isolated side's verdict on a write's user text. */
 export const VERIFY_TIMEOUT_MS = 10_000;
+
+/** The body as the dev log describes it: json, gzip-json, binary, none, … */
+function bodyKind(body: BodyContent, write: WriteDescription): string {
+  const parts: string[] = [];
+  if (body.encoding !== null) parts.push(body.encoding);
+  if (body.texts.length > 0) {
+    parts.push(body.form ? 'form' : write.json ? 'json' : 'text');
+  }
+  if (body.skipped !== null) parts.push(body.skipped);
+  return parts.length === 0 ? 'none' : parts.join('-');
+}
+
+/**
+ * Body reasons that block a first-party write: text that could not be read
+ * (too large, or behind a gzip header that does not decompress) may carry
+ * typed text the site would still receive.
+ */
+const UNREADABLE = new Set(['too-large', 'corrupt']);
 
 /**
  * The request safety net, installed in the page's own world at
@@ -21,15 +50,16 @@ export const VERIFY_TIMEOUT_MS = 10_000;
  * rolling values of the forms of values the user masked, plus the email
  * stand-ins issued for them.
  *
- * Tier 1 (message endpoints): any email in the message text that is not a
- * stand-in blocks the request; a message request sent with fetch also waits
- * for the isolated side to run the full detector on its message text fields
- * (no verdict in time blocks it). Tier 2 (every request): any value the user
- * has masked in this tab, in any common writing, blocks the request,
- * whatever its destination.
+ * First-party writes (every request that sends data to the site itself,
+ * any transport) have their user text checked, with the site's escaping
+ * undone: tier 1 blocks any email that is not a stand-in (synchronous, all
+ * transports); for fetch, which can wait, the isolated side then runs the
+ * full detector on it, and no verdict in time blocks the request. Tier 2
+ * (every request, any destination): any value the user has masked in this
+ * tab, in any common writing, blocks the request.
  */
 export function installNetGuard(
-  win: NetWindow & { performance: { now(): number } },
+  win: NetWindow & CodecGlobals & { performance: { now(): number } },
   doc: Document,
   rules: SiteNetRules,
 ): void {
@@ -39,6 +69,7 @@ export function installNetGuard(
   let matcher: FormMatcher | null = null;
   const setTimer = originalFunction(win, 'setTimeout');
   const now = originalFunction(win.performance, 'now');
+  const codecs = captureCodecs(win);
 
   const knowledge: NetKnowledge = {
     standIns,
@@ -89,36 +120,99 @@ export function installNetGuard(
     return false;
   };
 
-  /** The isolated side's verdict on a fetch message request's text. */
-  const verify = async (
-    parts: readonly string[],
+  /** One dev-log line per first-party write: no values, ever. */
+  const logWrite = (
+    request: DescribedRequest,
+    write: WriteDescription,
     transport: NetTransport,
-  ): Promise<boolean> => {
-    const started = now.call(win.performance);
-    const allowed = await channel.verify(parts, VERIFY_TIMEOUT_MS);
-    const ms = now.call(win.performance) - started;
-    channel.report({ event: 'net.verified', ms, block: !allowed });
-    return allowed ? true : blocked(1, 'message', transport);
+    checked: NetWriteCheck,
+    result: NetWriteResult,
+  ): void => {
+    if (!import.meta.env.DEV || request.url === null) return;
+    channel.report({
+      event: 'net.write',
+      method: request.method,
+      path: loggedPath(request.url),
+      transport,
+      category: write.surface,
+      fields: [...write.fields],
+      body: bodyKind(request.body, write),
+      checked,
+      result,
+    });
   };
 
-  wrapNetwork(win, (request: DescribedRequest, transport) => {
+  /** The isolated side's full check of a fetch write's user text. */
+  const verify = async (
+    request: DescribedRequest,
+    write: WriteDescription,
+  ): Promise<boolean> => {
+    const started = now.call(win.performance);
+    const outcome = await channel.verify(write.user, VERIFY_TIMEOUT_MS);
+    const ms = now.call(win.performance) - started;
+    channel.report({ event: 'net.verified', ms, block: outcome.block });
+    if (outcome.block) {
+      logWrite(request, write, 'fetch', 'full', 'block');
+      return blocked(1, write.surface, 'fetch');
+    }
+    logWrite(
+      request,
+      write,
+      'fetch',
+      'full',
+      outcome.possible > 0 ? 'possible' : 'pass',
+    );
+    return true;
+  };
+
+  wrapNetwork(win, codecs, (request: DescribedRequest, transport) => {
     let category: NetCategory = 'other';
     try {
       const texts = requestTexts(request, rules);
-      category = texts.message ? 'message' : 'other';
-      if (request.body.skippedBinary) {
-        channel.report({ event: 'net.skipped-binary', category, transport });
+      const { write } = texts;
+      category = write?.surface ?? 'other';
+      const { skipped } = request.body;
+      if (skipped !== null) {
+        channel.report({
+          event: 'net.skipped-binary',
+          category,
+          transport,
+          reason: skipped,
+        });
       }
-      const verdict = decideRequest(texts, knowledge);
-      if (verdict.block) return blocked(verdict.tier, category, transport);
+      const checked: NetWriteCheck =
+        write === null || write.skipped
+          ? 'skipped'
+          : transport === 'fetch'
+            ? 'full'
+            : 'sync';
+      if (write !== null && !write.skipped && skipped !== null) {
+        if (UNREADABLE.has(skipped)) {
+          logWrite(request, write, transport, checked, 'block');
+          return blocked(1, category, transport);
+        }
+      }
+      const verdict = decideRequest(
+        {
+          all: texts.all,
+          user: write === null || write.skipped ? null : write.user,
+        },
+        knowledge,
+      );
+      if (verdict.block) {
+        if (write !== null)
+          logWrite(request, write, transport, checked, 'block');
+        return blocked(verdict.tier, category, transport);
+      }
+      if (write === null) return true;
       if (import.meta.env.DEV && category === 'message') {
         channel.report({ event: 'net.checked', category, transport });
       }
       // Only fetch can wait; the other transports keep the checks above.
-      const parts = texts.messageParts;
-      if (transport === 'fetch' && parts !== null && parts.length > 0) {
-        return verify(parts, transport);
+      if (checked === 'full' && write.user.length > 0) {
+        return verify(request, write);
       }
+      logWrite(request, write, transport, checked, 'pass');
       return true;
     } catch {
       // A request the net cannot inspect does not go out; the failure is

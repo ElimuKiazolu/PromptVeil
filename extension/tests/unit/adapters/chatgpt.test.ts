@@ -5,6 +5,8 @@ import {
   chatgptNetRules,
   conversationIdFromUrl,
   createChatGptAdapter,
+  messageTexts,
+  writingBlockTexts,
 } from '@/src/adapters/chatgpt.ts';
 import { sendEventComposer } from '@/src/content/send-events.ts';
 import { AdapterError, type Composer } from '@/src/adapters/types.ts';
@@ -571,25 +573,55 @@ describe('ChatGPT edit-message box', () => {
 describe('ChatGPT request rules', () => {
   const url = (path: string, host = 'chatgpt.com') =>
     new URL(`https://${host}${path}`);
+  const endpoint = (path: string, method: string) =>
+    chatgptNetRules.endpoints.find((e) => e.matches(url(path), method))
+      ?.surface ?? null;
 
   it.each([
-    ['/backend-api/f/conversation', 'POST', true],
-    ['/backend-api/conversation', 'POST', true],
-    ['/backend-api/f/conversation/prepare', 'post', true],
-    ['/backend-api/f/conversation', 'GET', false],
-    ['/backend-api/conversations', 'POST', false],
-    ['/backend-api/settings', 'POST', false],
+    ['/backend-api/f/conversation', 'POST', 'message'],
+    ['/backend-api/conversation', 'POST', 'message'],
+    ['/backend-api/f/conversation/prepare', 'POST', 'message'],
+    [
+      '/backend-api/conversation/6acdb6c3/writing-blocks',
+      'POST',
+      'writing-block',
+    ],
+    [
+      '/backend-api/f/conversation/6acdb6c3/writing-blocks/x1',
+      'PATCH',
+      'writing-block',
+    ],
+    ['/backend-api/writing_blocks', 'PUT', 'writing-block'],
+    ['/backend-api/conversation/6acdb6c3', 'PATCH', null],
+    ['/backend-api/conversations', 'POST', null],
+    ['/backend-api/f/conversation', 'PUT', null],
   ] as const)('%s %s → %s', (path, method, expected) => {
-    expect(chatgptNetRules.isMessageEndpoint(url(path), method)).toBe(expected);
+    expect(endpoint(path, method)).toBe(expected);
   });
 
-  it('only matches chatgpt.com', () => {
-    expect(
-      chatgptNetRules.isMessageEndpoint(
-        url('/backend-api/f/conversation', 'example.org'),
-        'POST',
-      ),
-    ).toBe(false);
+  it('counts every write to chatgpt.com and its subdomains', () => {
+    for (const method of ['POST', 'PUT', 'PATCH', 'SEND']) {
+      expect(chatgptNetRules.isFirstPartyWrite(url('/x'), method)).toBe(true);
+      expect(
+        chatgptNetRules.isFirstPartyWrite(url('/x', 'ws.chatgpt.com'), method),
+      ).toBe(true);
+    }
+    for (const method of ['GET', 'HEAD', 'OPTIONS', 'DELETE']) {
+      expect(chatgptNetRules.isFirstPartyWrite(url('/x'), method)).toBe(false);
+    }
+    for (const host of [
+      'example.org',
+      'chatgpt.com.example.org',
+      'notchatgpt.com',
+    ]) {
+      expect(chatgptNetRules.isFirstPartyWrite(url('/x', host), 'POST')).toBe(
+        false,
+      );
+    }
+  });
+
+  it('skips no write without evidence', () => {
+    expect(chatgptNetRules.skip).toEqual([]);
   });
 
   it('extracts message text from new-message and edit bodies', () => {
@@ -602,17 +634,40 @@ describe('ChatGPT request rules', () => {
         },
       ],
     };
-    expect(chatgptNetRules.messageTexts(body)).toContain('hello test one');
+    expect(messageTexts(body)).toContain('hello test one');
   });
 
   it('has no message text in a regenerate body', () => {
-    expect(
-      chatgptNetRules.messageTexts({ action: 'variant', messages: [] }),
-    ).toEqual([]);
+    expect(messageTexts({ action: 'variant', messages: [] })).toEqual([]);
   });
 
-  it('reports an unexpected shape as null, so everything is checked', () => {
-    expect(chatgptNetRules.messageTexts({ prompt: 'x' })).toBeNull();
-    expect(chatgptNetRules.messageTexts('text')).toBeNull();
+  it('reports an unexpected message shape as null', () => {
+    expect(messageTexts({ prompt: 'x' })).toBeNull();
+    expect(messageTexts('text')).toBeNull();
+  });
+
+  it('extracts the text fields of a writing block', () => {
+    expect(
+      writingBlockTexts({
+        writing_block: {
+          content: 'Dear Sam',
+          metadata: {
+            subject: 'Party',
+            recipient: ['sam_lee@example.com'],
+            suggested_followups: [{ text: 'Shorter' }],
+            other: 'not read here',
+          },
+        },
+      }),
+    ).toEqual(['Dear Sam', 'Party', 'sam_lee@example.com', 'Shorter']);
+    expect(writingBlockTexts({ writing_block: { content: 'only' } })).toEqual([
+      'only',
+    ]);
+  });
+
+  it('reports a writing block without content as null', () => {
+    expect(writingBlockTexts({ writing_block: { metadata: {} } })).toBeNull();
+    expect(writingBlockTexts({ content: 'x' })).toBeNull();
+    expect(writingBlockTexts(null)).toBeNull();
   });
 });

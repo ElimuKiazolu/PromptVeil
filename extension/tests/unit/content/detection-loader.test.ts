@@ -15,6 +15,7 @@ function fakeRuntime(): DetectionRuntime {
   return {
     analyse: (text) => detectEmailsOnly(text),
     prepare: () => Promise.resolve(),
+    scan: (text) => detectEmailsOnly(text),
     clear: vi.fn(),
     dispose: vi.fn(),
     warmUp: () => Promise.resolve(),
@@ -27,7 +28,7 @@ function fakeRuntime(): DetectionRuntime {
 
 function fakeModule(runtime: DetectionRuntime): DetectionModuleApi {
   return {
-    DETECTION_API_VERSION: 6,
+    DETECTION_API_VERSION: 7,
     createDetection: () => runtime,
   };
 }

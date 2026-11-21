@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { NetTransport } from '@/src/shared/net-protocol.ts';
 import type { DescribedRequest } from '@/src/net/request.ts';
+import { captureCodecs } from '@/src/net/body.ts';
 import { wrapNetwork, type NetWindow } from '@/src/net/wrappers.ts';
 
 interface Calls {
@@ -66,7 +67,7 @@ describe('wrapNetwork', () => {
     env = fakeWindow();
     seen = [];
     // Blocks any request whose body or URL mentions "secret".
-    wrapNetwork(env.win, (request, transport) => {
+    wrapNetwork(env.win, captureCodecs(globalThis), (request, transport) => {
       seen.push({ request, transport });
       const text = [request.url?.href ?? '', ...request.body.texts].join(' ');
       return !text.includes('secret');
@@ -103,6 +104,14 @@ describe('wrapNetwork', () => {
       expect(seen[0]?.request.body.texts).toEqual(['b']);
     });
 
+    it('reports the method in upper case, as written in any case', async () => {
+      await env.win.fetch('/x', { method: 'patch', body: 'b' });
+      const xhr = new env.FakeXhr();
+      xhr.open('post', '/y');
+      xhr.send('b');
+      expect(seen.map((s) => s.request.method)).toEqual(['PATCH', 'POST']);
+    });
+
     it('accepts a URL object', async () => {
       await env.win.fetch(new URL('https://example.org/z'));
       expect(seen[0]?.request.url?.href).toBe('https://example.org/z');
@@ -132,11 +141,11 @@ describe('wrapNetwork', () => {
       expect(events).toEqual(['error', 'loadend']);
     });
 
-    it('reports a binary body as skipped', () => {
+    it('reports a Blob body it cannot wait to read as skipped', () => {
       const xhr = new env.FakeXhr();
       xhr.open('POST', '/upload');
       xhr.send(new Blob(['x']));
-      expect(seen[0]?.request.body.skippedBinary).toBe(true);
+      expect(seen[0]?.request.body.skipped).toBe('blob');
       expect(env.calls.xhr).toHaveLength(1);
     });
   });

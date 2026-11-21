@@ -1,8 +1,10 @@
-import { collectJsonStrings } from '@/src/core/net/checks.ts';
+import { collectJsonValues } from '@/src/core/net/checks.ts';
 import {
   AdapterError,
   type Composer,
   type ComposerKind,
+  type NetEndpoint,
+  type NetSkip,
   type SiteAdapter,
   type SiteNetRules,
 } from './types.ts';
@@ -63,17 +65,26 @@ const SELECTORS = {
 } as const;
 
 /**
- * Requests that carry prompt text. New messages and edits are
- * POST /backend-api/f/conversation with action "next" and the text in
- * messages[].content.parts; regenerate uses action "variant" with no
- * messages. The un-prefixed path is the earlier form of the same endpoint.
- * Every POST below it counts too (e.g. requests prepared while typing), so
- * draft text sent before the user presses Enter is checked as well.
+ * ChatGPT's requests for the safety net.
+ *
+ * - Messages: new messages and edits are POST /backend-api/f/conversation
+ *   with action "next" and the text in messages[].content.parts; regenerate
+ *   uses action "variant" with no messages; …/conversation/prepare is sent
+ *   while typing. The un-prefixed path is the earlier form.
+ * - Writing blocks (email and document cards in replies): every edit of a
+ *   card is saved with a POST to a path ending in …/writing-blocks, body
+ *   {conversation_id, message_id, updated_at, writing_block: {content
+ *   (markdown), metadata: {subject, recipient, suggested_followups},
+ *   variant}} (owner's live capture, P6.3).
+ * Every other write to chatgpt.com is checked with the free-text selection.
  */
 const NET = {
   hostname: 'chatgpt.com',
-  messagePath: /^\/backend-api\/(?:f\/)?conversation(?:\/|$)/,
-  messageMethod: 'POST',
+  /** Methods that send data; 'SEND' is a WebSocket message. */
+  writeMethods: new Set(['POST', 'PUT', 'PATCH', 'SEND']),
+  messagePath: /^\/backend-api\/(?:f\/)?conversation(?:\/prepare)?\/?$/,
+  writingBlockPath:
+    /^\/backend-api\/(?:[^/]+\/)*writing[-_]blocks?(?:\/[^/]+)?\/?$/,
 } as const;
 
 const USER_MESSAGE = SELECTORS.userMessage.join(', ');
@@ -186,29 +197,80 @@ export function conversationIdFromUrl(url: URL): string | null {
   return CONVERSATION_PATH.exec(url.pathname)?.[1] ?? null;
 }
 
-/** Request rules for the MAIN-world safety net. */
-export const chatgptNetRules: SiteNetRules = {
-  isMessageEndpoint: (url, method) =>
-    url.hostname === NET.hostname &&
-    method.toUpperCase() === NET.messageMethod &&
-    NET.messagePath.test(url.pathname),
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
-  messageTexts(body) {
-    if (typeof body !== 'object' || body === null) return null;
-    const { messages } = body as { messages?: unknown };
-    if (!Array.isArray(messages)) return null;
-    const texts: string[] = [];
-    for (const message of messages) {
-      // Every string in each message's content counts, so text parts nested
-      // in other part types are covered too.
-      const content: unknown =
-        typeof message === 'object' && message !== null
-          ? (message as { content?: unknown }).content
-          : message;
-      texts.push(...collectJsonStrings(content));
+/** The user's message text: every string of each message's content. */
+export function messageTexts(body: unknown): string[] | null {
+  if (!isRecord(body)) return null;
+  const { messages } = body;
+  if (!Array.isArray(messages)) return null;
+  const texts: string[] = [];
+  for (const message of messages) {
+    // Every string in each message's content counts, so text parts nested
+    // in other part types are covered too.
+    const content: unknown = isRecord(message) ? message.content : message;
+    texts.push(...collectJsonValues(content));
+  }
+  return texts;
+}
+
+/**
+ * The text of a saved writing block: its content and the subject,
+ * recipient and suggested follow-ups of its metadata (any of these may be
+ * missing; the content may not).
+ */
+export function writingBlockTexts(body: unknown): string[] | null {
+  if (!isRecord(body)) return null;
+  const block = body.writing_block;
+  if (!isRecord(block) || typeof block.content !== 'string') return null;
+  const texts = [block.content];
+  const { metadata } = block;
+  if (isRecord(metadata)) {
+    for (const field of ['subject', 'recipient', 'suggested_followups']) {
+      texts.push(...collectJsonValues(metadata[field]));
     }
-    return texts;
+  }
+  return texts;
+}
+
+const ENDPOINTS: readonly NetEndpoint[] = [
+  {
+    surface: 'message',
+    matches: (url, method) =>
+      method === 'POST' && NET.messagePath.test(url.pathname),
+    userTexts: messageTexts,
+    loggedObjects: [],
   },
+  {
+    surface: 'writing-block',
+    matches: (url, method) =>
+      method !== 'SEND' && NET.writingBlockPath.test(url.pathname),
+    userTexts: writingBlockTexts,
+    loggedObjects: ['writing_block', 'writing_block.metadata'],
+  },
+];
+
+/**
+ * First-party writes known to carry no user text. Empty until the live
+ * surface tour (P6.3) shows one with evidence; analytics are not skipped on
+ * assumption (their events can carry page text). Each entry must be one
+ * exact method and path, with the evidence in a comment above it.
+ */
+const SKIP: readonly NetSkip[] = [];
+
+const isChatGptHost = (hostname: string): boolean =>
+  hostname === NET.hostname || hostname.endsWith(`.${NET.hostname}`);
+
+/**
+ * Request rules for the MAIN-world safety net. Methods arrive upper-cased
+ * (src/net/request.ts).
+ */
+export const chatgptNetRules: SiteNetRules = {
+  isFirstPartyWrite: (url, method) =>
+    isChatGptHost(url.hostname) && NET.writeMethods.has(method),
+  endpoints: ENDPOINTS,
+  skip: SKIP,
 };
 
 /**

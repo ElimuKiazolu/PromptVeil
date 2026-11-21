@@ -6,7 +6,7 @@ import {
 } from '@/src/core/net/hash.ts';
 import { createRollingHash, rollingBase } from '@/src/core/net/rolling.ts';
 import type { StandInMapping } from '@/src/core/restore/index.ts';
-import { devlog } from '@/src/shared/devlog.ts';
+import { devlog, type DevDetails } from '@/src/shared/devlog.ts';
 import {
   NET_KEY_OFFER,
   NET_MAIN_HELLO,
@@ -15,13 +15,62 @@ import {
   parseReport,
   parseVerifyRequest,
   type NetAddition,
+  type NetReport,
 } from '@/src/shared/net-protocol.ts';
 
+/** The isolated side's verdict on the user's text in a first-party write. */
+export interface VerifierResult {
+  /** The text holds a value that should have been masked. */
+  readonly block: boolean;
+  /** "possible" values found (counted, never blocked). */
+  readonly possible: number;
+}
+
 /**
- * Decides whether message text may be sent: true blocks it (it holds a value
- * that should have been masked). A rejection blocks it too.
+ * Decides whether the user's text in a first-party write may be sent. A
+ * rejection blocks it.
  */
-export type MessageVerifier = (texts: readonly string[]) => Promise<boolean>;
+export type MessageVerifier = (
+  texts: readonly string[],
+) => Promise<VerifierResult>;
+
+/** A report from the net as dev-log details (fixed codes only). */
+function reportDetails(report: NetReport): DevDetails {
+  switch (report.event) {
+    case 'net.added':
+      return { count: report.count };
+    case 'net.verified':
+      return { ms: report.ms, block: report.block };
+    case 'net.blocked':
+      return {
+        tier: report.tier,
+        category: report.category,
+        transport: report.transport,
+      };
+    case 'net.skipped-binary':
+      return {
+        category: report.category,
+        transport: report.transport,
+        skip: report.reason,
+      };
+    case 'net.write':
+      return {
+        category: report.category,
+        transport: report.transport,
+        write: {
+          method: report.method,
+          path: report.path,
+          fields: report.fields,
+          body: report.body,
+          checked: report.checked,
+          result: report.result,
+        },
+      };
+    case 'net.checked':
+    case 'net.failed':
+      return { category: report.category, transport: report.transport };
+  }
+}
 
 export interface NetBridge {
   /** True once the MAIN-world net confirmed the handshake. */
@@ -35,8 +84,9 @@ export interface NetBridge {
    */
   sync(mappings: readonly StandInMapping[]): void;
   /**
-   * Answers the net's verify requests for message text sent with fetch.
-   * Until a verifier is set, every such request is blocked.
+   * Answers the net's verify requests for the user's text in first-party
+   * writes sent with fetch. Until a verifier is set, every such request is
+   * blocked.
    */
   setVerifier(verifier: MessageVerifier): void;
 }
@@ -101,13 +151,18 @@ export function startNetBridge(doc: Document = document): NetBridge {
     },
   };
 
-  const answer = (id: number, block: boolean): void => {
+  const answer = (id: number, result: VerifierResult): void => {
     doc.dispatchEvent(
       new CustomEvent(netChannelEvent(key, 'verdict'), {
-        detail: JSON.stringify({ id, block }),
+        detail: JSON.stringify({
+          id,
+          block: result.block,
+          possible: result.possible,
+        }),
       }),
     );
   };
+  const BLOCK: VerifierResult = { block: true, possible: 0 };
 
   if (!isHandshakeWindowOpen(doc)) {
     devlog('net.missing');
@@ -137,8 +192,7 @@ export function startNetBridge(doc: Document = document): NetBridge {
     if (!(event instanceof CustomEvent)) return;
     const report = parseReport(event.detail);
     if (!report) return;
-    const { event: name, ...details } = report;
-    devlog(name, details);
+    devlog(report.event, reportDetails(report));
   });
   doc.addEventListener(netChannelEvent(key, 'verify'), (event) => {
     if (!(event instanceof CustomEvent)) return;
@@ -146,16 +200,16 @@ export function startNetBridge(doc: Document = document): NetBridge {
     if (!request) return;
     const current = verifier;
     if (current === null) {
-      answer(request.id, true);
+      answer(request.id, BLOCK);
       return;
     }
     current(request.texts).then(
-      (block) => {
-        answer(request.id, block);
+      (result) => {
+        answer(request.id, result);
       },
       (error: unknown) => {
         devlog('net.failed', { error });
-        answer(request.id, true);
+        answer(request.id, BLOCK);
       },
     );
   });

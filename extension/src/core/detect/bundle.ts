@@ -34,7 +34,7 @@ import { localeForRegion, type LocaleId } from '../surrogate/words/locales.ts';
 import { createWordStore, type WordLoader } from '../surrogate/words/store.ts';
 
 /** Changes whenever the module's exports change shape. */
-export const DETECTION_API_VERSION = 6;
+export const DETECTION_API_VERSION = 7;
 
 export interface DetectionConfig {
   readonly homeRegions: readonly CountryCode[];
@@ -60,6 +60,12 @@ export interface DetectionRuntime {
   analyse(text: string): Promise<Detection[]>;
   /** Background pre-pass while the user writes. */
   prepare(text: string): Promise<void>;
+  /**
+   * The detections in this text, for the request safety net's check of
+   * text the site saves (e.g. writing blocks). Its own cache of recent texts,
+   * so frequent saves never push the composer's draft out of analyse()'s.
+   */
+  scan(text: string): Promise<Detection[]>;
   /** Forgets cached results (they hold real values). */
   clear(): void;
   /** clear(), for good. */
@@ -90,6 +96,12 @@ export interface DetectionRuntime {
     attempt: number,
   ): StandIn | null;
 }
+
+/**
+ * Texts whose scan results are kept: the paragraphs of a long saved
+ * document (src/core/net/write-check.ts) with room to spare.
+ */
+const SCAN_CACHE_SIZE = 256;
 
 /** Locales of the home regions, then of the other preferred regions. */
 function preferredLocales(config: DetectionConfig): LocaleId[] {
@@ -122,7 +134,7 @@ export function createDetection(
     preferredLocales: preferredLocales(current),
     keepCity: current.keepCity,
   });
-  const analyzerFor = (settings: DetectionConfig) =>
+  const analyzerFor = (settings: DetectionConfig, cacheSize?: number) =>
     createDraftAnalyzer({
       analyse: rulesAnalysis({
         homeRegions: settings.homeRegions,
@@ -133,16 +145,21 @@ export function createDetection(
       }),
       yielder,
       onClear: clearRuleCaches,
+      ...(cacheSize === undefined ? {} : { cacheSize }),
     });
   let analyzer = analyzerFor(config);
+  let scanner = analyzerFor(config, SCAN_CACHE_SIZE);
   return {
     analyse: (text) => analyzer.analyse(text),
     prepare: (text) => analyzer.prepare(text),
+    scan: (text) => scanner.analyse(text),
     clear: () => {
       analyzer.clear();
+      scanner.clear();
     },
     dispose: () => {
       analyzer.dispose();
+      scanner.dispose();
     },
     warmUp: (checkpoint) => warmUpRules(checkpoint),
     normalise: (detection) =>
@@ -168,8 +185,11 @@ export function createDetection(
     configure: (next) => {
       current = next;
       const previous = analyzer;
+      const previousScanner = scanner;
       analyzer = analyzerFor(next);
+      scanner = analyzerFor(next, SCAN_CACHE_SIZE);
       previous.clear();
+      previousScanner.clear();
     },
   };
 }
