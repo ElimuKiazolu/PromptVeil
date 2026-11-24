@@ -8,6 +8,7 @@ import { createFormHasher, normaliseValue } from '@/src/core/net/hash.ts';
 import { createRollingHash, rollingBase } from '@/src/core/net/rolling.ts';
 import { isSpikeStandIn } from '@/src/core/spike-standin.ts';
 import type {
+  NetBlockCause,
   NetCategory,
   NetTransport,
   NetWriteCheck,
@@ -111,12 +112,26 @@ export function installNetGuard(
     },
   });
 
+  /**
+   * Reports a block with its cause, so the isolated side can explain it:
+   * counts and keyed hashes only, never content.
+   */
   const blocked = (
     tier: 1 | 2,
     category: NetCategory,
     transport: NetTransport,
+    cause: NetBlockCause,
+    found: { emails?: number; forms?: readonly string[] } = {},
   ): false => {
-    channel.report({ event: 'net.blocked', tier, category, transport });
+    channel.report({
+      event: 'net.blocked',
+      tier,
+      category,
+      transport,
+      cause,
+      emails: found.emails ?? 0,
+      forms: [...(found.forms ?? [])],
+    });
     return false;
   };
 
@@ -148,12 +163,16 @@ export function installNetGuard(
     write: WriteDescription,
   ): Promise<boolean> => {
     const started = now.call(win.performance);
-    const outcome = await channel.verify(write.user, VERIFY_TIMEOUT_MS);
+    const outcome = await channel.verify(
+      write.user,
+      write.surface,
+      VERIFY_TIMEOUT_MS,
+    );
     const ms = now.call(win.performance) - started;
     channel.report({ event: 'net.verified', ms, block: outcome.block });
     if (outcome.block) {
       logWrite(request, write, 'fetch', 'full', 'block');
-      return blocked(1, write.surface, 'fetch');
+      return blocked(1, write.surface, 'fetch', 'verified');
     }
     logWrite(
       request,
@@ -189,7 +208,7 @@ export function installNetGuard(
       if (write !== null && !write.skipped && skipped !== null) {
         if (UNREADABLE.has(skipped)) {
           logWrite(request, write, transport, checked, 'block');
-          return blocked(1, category, transport);
+          return blocked(1, category, transport, 'unreadable');
         }
       }
       const verdict = decideRequest(
@@ -202,7 +221,13 @@ export function installNetGuard(
       if (verdict.block) {
         if (write !== null)
           logWrite(request, write, transport, checked, 'block');
-        return blocked(verdict.tier, category, transport);
+        return verdict.tier === 1
+          ? blocked(1, category, transport, 'email', {
+              emails: verdict.emails,
+            })
+          : blocked(2, category, transport, 'masked', {
+              forms: verdict.forms,
+            });
       }
       if (write === null) return true;
       if (import.meta.env.DEV && category === 'message') {

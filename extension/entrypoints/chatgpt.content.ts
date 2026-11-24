@@ -11,10 +11,14 @@ import {
 import { vaultLifecycle } from '@/src/content/vault-lifecycle.ts';
 import { createVaultSession } from '@/src/content/vault-session.ts';
 import { loadWordList } from '@/src/content/word-lists.ts';
+import { startWriteNotices } from '@/src/content/write-notices.ts';
 import { createMainThreadYielder } from '@/src/content/yielder.ts';
 import { createCheckpoint } from '@/src/core/detect/schedule.ts';
 import type { DetectionConfig } from '@/src/core/detect/bundle.ts';
-import { checkUserTexts } from '@/src/core/net/write-check.ts';
+import {
+  checkUserTexts,
+  type WriteCheckOptions,
+} from '@/src/core/net/write-check.ts';
 import { createPipeline, needsMasking } from '@/src/core/pipeline.ts';
 import {
   regionsFromLanguages,
@@ -23,6 +27,7 @@ import {
 import { devlog } from '@/src/shared/devlog.ts';
 import { isExtensionContextValid } from '@/src/shared/extension-context.ts';
 import { createMessenger, PROTOCOL } from '@/src/shared/messaging.ts';
+import { createNoticeLayer } from '@/src/ui/notice/layer.ts';
 
 /** Longest wait for an idle period before loading detection anyway. */
 const IDLE_TIMEOUT_MS = 2000;
@@ -151,19 +156,41 @@ export default defineContentScript({
         }
       },
     });
-    // First-party writes sent with fetch: the net asks whether the user's
-    // text in them holds a value a send would have masked.
-    net.setVerifier(async (texts) => {
-      // Waits for the module like a send does; a load failure blocks.
+    // The send pipeline's rule, applied to text written elsewhere on the
+    // page (first-party writes, card editors).
+    const writeCheck = async (): Promise<WriteCheckOptions> => {
+      // Waits for the module like a send does; a load failure rejects.
       const runtime = await detection.ready();
-      return checkUserTexts(texts, {
+      return {
         scan: (text) => runtime.scan(text),
         needsMasking: (found) =>
           needsMasking(found, current.entityTypes, (value) =>
             session.isIssued(value),
           ),
         isMaskedType: (found) => current.entityTypes.has(found.type),
-      });
+      };
+    };
+    // First-party writes sent with fetch: the net asks whether the user's
+    // text in them holds a value a send would have masked. A rejection
+    // blocks the write.
+    net.setVerifier(async (texts) => checkUserTexts(texts, await writeCheck()));
+    // Tells the user when a write was stopped, and warns while they type a
+    // value into a card editor (read only).
+    startWriteNotices({
+      adapter,
+      net,
+      createLayer: (onDismiss) =>
+        createNoticeLayer({
+          onDismiss,
+          pageAnchor: () => {
+            const editor = adapter.getMainComposer()?.getEditor() ?? null;
+            return editor?.closest('form') ?? editor;
+          },
+        }),
+      scanCard: async (text) =>
+        (await checkUserTexts([text], await writeCheck())).items,
+      signal: ctx.signal,
+      now: () => performance.now(),
     });
     startInstance({
       adapter,

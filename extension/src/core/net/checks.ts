@@ -3,10 +3,19 @@ import { compactForm } from './compact.ts';
 import { normaliseValue, type FormHasher } from './hash.ts';
 import type { RollingHash } from './rolling.ts';
 import { unescapeText } from './unescape.ts';
+import { MAX_BLOCKED_FORMS } from '../../shared/net-protocol.ts';
 
 export type NetTier = 1 | 2;
 
-export type NetVerdict = { block: false } | { block: true; tier: NetTier };
+/**
+ * A blocked request says what it carried, for the notice (never values):
+ * tier 1 the number of emails that are not stand-ins, tier 2 the keyed
+ * hashes of the masked-value forms found (at most MAX_BLOCKED_FORMS).
+ */
+export type NetVerdict =
+  | { block: false }
+  | { block: true; tier: 1; emails: number }
+  | { block: true; tier: 2; forms: readonly string[] };
 
 const ALLOW: NetVerdict = { block: false };
 
@@ -111,15 +120,26 @@ export function violatesTier1(
   messageTexts: readonly string[],
   knowledge: NetKnowledge,
 ): boolean {
+  return tier1Emails(messageTexts, knowledge, true) > 0;
+}
+
+/** Distinct emails in the texts that are not stand-ins. */
+function tier1Emails(
+  messageTexts: readonly string[],
+  knowledge: NetKnowledge,
+  firstOnly: boolean,
+): number {
+  const found = new Set<string>();
   for (const text of messageTexts) {
     for (const span of detectEmails(text)) {
       const email = normaliseValue('email', span.value);
       if (!knowledge.standIns.has(email) && !knowledge.isStandIn(email)) {
-        return true;
+        found.add(email);
+        if (firstOnly) return 1;
       }
     }
   }
-  return false;
+  return found.size;
 }
 
 /**
@@ -149,23 +169,49 @@ export function violatesTier2(
   if (!matcher || knowledge.formHashes.size === 0) return false;
   for (const text of texts) {
     for (const compact of compactForms(text)) {
-      if (violatesCompact(compact, knowledge, matcher)) return true;
+      if (scanCompact(compact, knowledge, matcher, null)) return true;
     }
   }
   return false;
 }
 
-function violatesCompact(
+/**
+ * The keyed hashes of every masked-value form in the texts (at most
+ * MAX_BLOCKED_FORMS). Runs only once a request is blocked.
+ */
+function tier2Forms(
+  texts: readonly string[],
+  knowledge: NetKnowledge,
+): string[] {
+  const { matcher } = knowledge;
+  const found = new Set<string>();
+  if (!matcher) return [];
+  for (const text of texts) {
+    for (const compact of compactForms(text)) {
+      if (scanCompact(compact, knowledge, matcher, found)) return [...found];
+    }
+  }
+  return [...found];
+}
+
+/**
+ * Looks for masked forms in one compact text. Without `collect`, stops at
+ * the first; with it, gathers their hashes and stops when it is full.
+ */
+function scanCompact(
   compact: string,
   knowledge: NetKnowledge,
   matcher: FormMatcher,
+  collect: Set<string> | null,
 ): boolean {
   for (const [length, values] of knowledge.rollingByLength) {
-    const found = matcher.rolling.scan(compact, length, values, (start) =>
-      knowledge.formHashes.has(
-        matcher.hash(compact.slice(start, start + length)),
-      ),
-    );
+    const found = matcher.rolling.scan(compact, length, values, (start) => {
+      const hash = matcher.hash(compact.slice(start, start + length));
+      if (!knowledge.formHashes.has(hash)) return false;
+      if (collect === null) return true;
+      collect.add(hash);
+      return collect.size >= MAX_BLOCKED_FORMS;
+    });
     if (found) return true;
   }
   return false;
@@ -187,8 +233,14 @@ export function decideRequest(
   knowledge: NetKnowledge,
 ): NetVerdict {
   if (texts.user && violatesTier1(texts.user, knowledge)) {
-    return { block: true, tier: 1 };
+    return {
+      block: true,
+      tier: 1,
+      emails: tier1Emails(texts.user, knowledge, false),
+    };
   }
-  if (violatesTier2(texts.all, knowledge)) return { block: true, tier: 2 };
+  if (violatesTier2(texts.all, knowledge)) {
+    return { block: true, tier: 2, forms: tier2Forms(texts.all, knowledge) };
+  }
   return ALLOW;
 }

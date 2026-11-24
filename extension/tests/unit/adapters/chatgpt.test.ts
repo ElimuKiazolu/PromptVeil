@@ -671,3 +671,63 @@ describe('ChatGPT request rules', () => {
     expect(writingBlockTexts(null)).toBeNull();
   });
 });
+
+describe('ChatGPT card editors', () => {
+  const read = (file: string) =>
+    readFileSync(resolve(`tests/fixtures/sites/chatgpt/${file}`), 'utf8');
+
+  /** The composer and a writing card reply on one page. */
+  function loadCardPage(): void {
+    loadComposer(read('composer.html') + read('reply-writing-block.html'));
+  }
+
+  it('finds the writing card editor from anything inside it', () => {
+    loadCardPage();
+    const adapter = createChatGptAdapter();
+    const card = document.querySelector<HTMLElement>(
+      '.writing-block-editor [contenteditable="true"]',
+    );
+    if (!card) throw new Error('no card');
+    expect(adapter.cardEditorFor(card)).toBe(card);
+    const span = card.querySelector('span');
+    expect(adapter.cardEditorFor(span?.firstChild ?? null)).toBe(card);
+  });
+
+  it('never takes the composer, an edit box or plain page text for a card', () => {
+    loadCardPage();
+    const adapter = createChatGptAdapter();
+    const editor = adapter.getMainComposer()?.getEditor() ?? null;
+    expect(adapter.cardEditorFor(editor)).toBeNull();
+    expect(adapter.cardEditorFor(document.body)).toBeNull();
+    expect(adapter.cardEditorFor(null)).toBeNull();
+    loadComposer(read('edit-box.html'));
+    const edit = document.querySelector('form [contenteditable="true"]');
+    expect(adapter.cardEditorFor(edit)).toBeNull();
+  });
+
+  it('takes any editable root inside an assistant reply as a card', () => {
+    loadComposer(read('reply.html'));
+    const reply = document.querySelector(
+      '[data-markdown-text-style="assistant-message"]',
+    );
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    reply?.append(editable);
+    expect(createChatGptAdapter().cardEditorFor(editable)).toBe(editable);
+  });
+
+  it('reads the card text with paragraphs apart, without changing it', () => {
+    loadCardPage();
+    const adapter = createChatGptAdapter();
+    const card = document.querySelector<HTMLElement>(
+      '.writing-block-editor .ProseMirror',
+    );
+    if (!card) throw new Error('no card');
+    const before = card.cloneNode(true);
+    const text = adapter.readCardText(card);
+    expect(text).toContain(
+      'Housewarming Invitation\n\nDear standin.1@example.net,',
+    );
+    expect(card.isEqualNode(before)).toBe(true);
+  });
+});

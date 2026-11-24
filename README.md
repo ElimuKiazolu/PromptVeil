@@ -19,7 +19,7 @@ npm run dev
 1. Open `chrome://extensions` (or `edge://extensions`) and turn on Developer mode.
 2. Choose "Load unpacked" and select `extension/.output/chrome-mv3-dev`.
 
-Run the tests with `npm test`.
+Run the tests with `npm test`. The browser checks (`npm run e2e`) run the built extension in headless Chrome against a local copy of chatgpt.com; see `extension/tests/e2e/README.md`.
 
 ### NER benchmark (development only)
 

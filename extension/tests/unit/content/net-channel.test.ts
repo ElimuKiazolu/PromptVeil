@@ -17,6 +17,8 @@ import {
   NET_KEY_OFFER,
   NET_MAIN_HELLO,
   type NetAddition,
+  type NetCategory,
+  type NetReport,
 } from '@/src/shared/net-protocol.ts';
 
 const DANA: StandInMapping = {
@@ -27,7 +29,7 @@ const DANA: StandInMapping = {
 
 const VALID_KEY = 'ab'.repeat(32);
 
-const PASS: VerifierResult = { block: false, possible: 0 };
+const PASS: VerifierResult = { block: false, possible: 0, items: [] };
 
 /** MAIN-channel handlers that do nothing, with a real timer. */
 function handlers() {
@@ -186,6 +188,9 @@ describe('handshake between the isolated script and the MAIN-world net', () => {
       tier: 2,
       category: 'other',
       transport: 'beacon',
+      cause: 'masked',
+      emails: 0,
+      forms: [],
     });
     const lines = info.mock.calls.map((c) => String(c[0]));
     expect(
@@ -339,6 +344,7 @@ describe('installNetGuard', () => {
       return Promise.resolve({
         block: texts.some((t) => t.includes('AB 12 34 56 C')),
         possible: 0,
+        items: [],
       });
     });
     await expect(
@@ -414,5 +420,93 @@ describe('installNetGuard', () => {
       lines.some((l) => / net\.verified ms=\d+\.\d block=false$/u.test(l)),
     ).toBe(true);
     expect(lines.join('\n')).not.toContain('hello');
+  });
+});
+
+describe('block reports for notices', () => {
+  function setUp() {
+    const doc = documentAtStart();
+    const env = fakeWindow();
+    installNetGuard(env.win, doc, chatgptNetRules);
+    const bridge = startNetBridge(doc);
+    bridge.setVerifier(() => Promise.resolve(PASS));
+    const reports: NetReport[] = [];
+    bridge.onReport((report) => reports.push(report));
+    const verdicts: [NetCategory, VerifierResult | null][] = [];
+    bridge.onVerdict((category, result) => verdicts.push([category, result]));
+    pageScriptsMayRun(doc);
+    return { ...env, bridge, reports, verdicts };
+  }
+
+  const blockedReports = (reports: readonly NetReport[]) =>
+    reports.filter((r) => r.event === 'net.blocked');
+
+  it('counts the emails of a tier-1 block (no values)', () => {
+    const { FakeXhr, reports } = setUp();
+    const xhr = new FakeXhr();
+    xhr.open('PATCH', 'https://chatgpt.com/backend-api/conversation/abc');
+    xhr.send(JSON.stringify({ title: 'dana@example.com and ops@example.org' }));
+    expect(blockedReports(reports)).toEqual([
+      {
+        event: 'net.blocked',
+        tier: 1,
+        category: 'write',
+        transport: 'xhr',
+        cause: 'email',
+        emails: 2,
+        forms: [],
+      },
+    ]);
+  });
+
+  it('names the type of a value masked earlier through its keyed form', () => {
+    const { FakeNavigator, bridge, reports } = setUp();
+    bridge.sync([{ ...NINO, entity: 'NATIONAL_ID' }]);
+    new FakeNavigator().sendBeacon('/ces/v1/t', 'note AB123456C');
+    const [report] = blockedReports(reports);
+    expect(report).toMatchObject({
+      tier: 2,
+      cause: 'masked',
+      category: 'write',
+    });
+    const forms = report?.event === 'net.blocked' ? report.forms : [];
+    expect(forms).toHaveLength(1);
+    expect(bridge.valueOfForm(forms[0] ?? '')).toEqual({
+      type: 'NATIONAL_ID',
+      standIn: NINO.standIn,
+    });
+    expect(bridge.valueOfForm('0f'.repeat(32))).toBeNull();
+  });
+
+  it('tells listeners the verdict of a fetch write, with its category and kinds', async () => {
+    const { win, bridge, reports, verdicts } = setUp();
+    const items = [{ type: 'PHONE' as const, subtype: null, count: 1 }];
+    bridge.setVerifier(() =>
+      Promise.resolve({ block: true, possible: 0, items }),
+    );
+    await expect(
+      win.fetch('/backend-api/conversation/abc/writing-blocks', {
+        method: 'POST',
+        body: JSON.stringify({ writing_block: { content: 'Call me soon' } }),
+      }),
+    ).rejects.toThrow(TypeError);
+    expect(verdicts).toEqual([
+      ['writing-block', { block: true, possible: 0, items }],
+    ]);
+    expect(blockedReports(reports)).toMatchObject([
+      { cause: 'verified', category: 'writing-block', transport: 'fetch' },
+    ]);
+  });
+
+  it('tells listeners a failed verification (blocked, unchecked)', async () => {
+    const { win, bridge, verdicts } = setUp();
+    bridge.setVerifier(() => Promise.reject(new Error('detector failed')));
+    await expect(
+      win.fetch('/backend-api/conversation/abc/writing-blocks', {
+        method: 'POST',
+        body: JSON.stringify({ writing_block: { content: 'Hello there' } }),
+      }),
+    ).rejects.toThrow(TypeError);
+    expect(verdicts).toEqual([['writing-block', null]]);
   });
 });

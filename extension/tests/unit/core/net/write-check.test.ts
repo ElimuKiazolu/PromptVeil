@@ -87,8 +87,21 @@ describe('checkUserTexts', () => {
       'My NI number is AB 12 34 56 C',
       'IBAN GB82 WEST 1234 5698 7654 32',
     ]) {
-      expect(await check([text])).toEqual({ block: true, possible: 0 });
+      expect(await check([text])).toMatchObject({ block: true, possible: 0 });
     }
+  });
+
+  it('counts the blocking values by kind, each distinct value once', async () => {
+    const { check } = checker(['olivia.hughes@example.net']);
+    const result = await check([
+      'Write to sam_lee@example.com or ops@example.org.\n\nAgain: sam_lee@example.com',
+      'Call 07400 123456, NI AB 12 34 56 C, olivia.hughes@example.net',
+    ]);
+    expect(result.items).toEqual([
+      { type: 'EMAIL', subtype: null, count: 2 },
+      { type: 'PHONE', subtype: null, count: 1 },
+      { type: 'NATIONAL_ID', subtype: 'UK_NINO', count: 1 },
+    ]);
   });
 
   it('passes text with no personal data, and issued stand-ins', async () => {
@@ -96,10 +109,12 @@ describe('checkUserTexts', () => {
     expect(await check(['Dear team, the plan is below.'])).toEqual({
       block: false,
       possible: 0,
+      items: [],
     });
     expect(await check(['Reply to olivia.hughes@example.net'])).toEqual({
       block: false,
       possible: 0,
+      items: [],
     });
   });
 
@@ -110,6 +125,7 @@ describe('checkUserTexts', () => {
     expect(await check(['see 0612345678 later'])).toEqual({
       block: false,
       possible: 1,
+      items: [],
     });
   });
 
@@ -120,10 +136,12 @@ describe('checkUserTexts', () => {
     expect(await check(['Date of birth:\n\n14/07/1986'])).toEqual({
       block: true,
       possible: 0,
+      items: [{ type: 'DOB', subtype: null, count: 1 }],
     });
     expect(await check(['Meeting 14/07/1986'])).toEqual({
       block: false,
       possible: 0,
+      items: [],
     });
   });
 
@@ -151,7 +169,7 @@ describe('checkUserTexts', () => {
       needsMasking: () => true,
       isMaskedType: () => true,
     });
-    expect(result).toEqual({ block: false, possible: 0 });
+    expect(result).toEqual({ block: false, possible: 0, items: [] });
     expect(scan).toHaveBeenCalledTimes(2);
   });
 

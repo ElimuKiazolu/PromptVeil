@@ -29,6 +29,8 @@
   --color-graphite: #262a28;
   --color-night: #0f1c18;
   --color-mustard: #b98a16;
+  /* Mustard's hue at lower lightness: icons and marks on Mist (AA, 4.6:1). */
+  --color-mustard-ink: #896610;
   --color-brick: #a3262a;
 
   --font-sans:

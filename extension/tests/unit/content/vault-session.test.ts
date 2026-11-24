@@ -190,6 +190,8 @@ describe('vault session', () => {
         boundary: 'email',
         // What the request safety net looks for.
         netForms: ['danawhitfieldexamplecom'],
+        // Names the type in notices about stopped requests.
+        entity: 'EMAIL',
       },
     ]);
     expect(after.log).toEqual(['net 1', 'source 1']);
@@ -612,6 +614,9 @@ describe('vault session in the page', () => {
       callback();
     },
     setVerifier: () => undefined,
+    onVerdict: () => undefined,
+    onReport: () => undefined,
+    valueOfForm: () => null,
     sync: (mappings) => {
       synced.push(mappings.length);
     },

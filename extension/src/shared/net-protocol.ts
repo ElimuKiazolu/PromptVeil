@@ -66,6 +66,8 @@ export interface NetAddition {
 export interface NetVerifyRequest {
   id: number;
   texts: string[];
+  /** The write's surface, so a blocked write can be explained. */
+  category: NetCategory;
 }
 
 export interface NetVerdict {
@@ -147,7 +149,9 @@ export function parseVerifyRequest(detail: unknown): NetVerifyRequest | null {
     return null;
   }
   const texts = stringArray(record.texts);
-  return texts === null ? null : { id: record.id as number, texts };
+  const { category } = record;
+  if (texts === null || !isCategory(category)) return null;
+  return { id: record.id as number, texts, category };
 }
 
 export function parseVerdict(detail: unknown): NetVerdict | null {
@@ -206,14 +210,32 @@ export interface NetWriteReport {
   result: NetWriteResult;
 }
 
+/**
+ * Why the net blocked a request:
+ * - email: tier 1 found emails that are not stand-ins (`emails` counts them);
+ * - masked: tier 2 found values masked earlier (`forms`: their keyed hashes);
+ * - verified: the isolated side's full check said block (it knows why);
+ * - unreadable: a first-party write whose text could not be read.
+ */
+export type NetBlockCause = 'email' | 'masked' | 'verified' | 'unreadable';
+
+/** A blocked request; never its content. */
+export interface NetBlockedReport {
+  event: 'net.blocked';
+  tier: 1 | 2;
+  category: NetCategory;
+  transport: NetTransport;
+  cause: NetBlockCause;
+  emails: number;
+  forms: string[];
+}
+
+/** Most form hashes a blocked report carries. */
+export const MAX_BLOCKED_FORMS = 20;
+
 /** What the net reports back; fixed codes only, never request content. */
 export type NetReport =
-  | {
-      event: 'net.blocked';
-      tier: 1 | 2;
-      category: NetCategory;
-      transport: NetTransport;
-    }
+  | NetBlockedReport
   | {
       event: 'net.skipped-binary';
       category: NetCategory;
@@ -244,6 +266,44 @@ const SKIP_REASONS: readonly string[] = [
   'stream',
   'file',
 ];
+const BLOCK_CAUSES: readonly string[] = [
+  'email',
+  'masked',
+  'verified',
+  'unreadable',
+];
+
+function isCategory(value: unknown): value is NetCategory {
+  return typeof value === 'string' && CATEGORIES.includes(value);
+}
+
+function parseBlocked(
+  r: Record<string, unknown>,
+  base: { transport: NetTransport; category: NetCategory },
+): NetBlockedReport | null {
+  const { tier, cause, emails } = r;
+  const forms = stringArray(r.forms);
+  if (
+    (tier !== 1 && tier !== 2) ||
+    typeof cause !== 'string' ||
+    !BLOCK_CAUSES.includes(cause) ||
+    !isWholeNumber(emails, 0, MAX_ITEMS) ||
+    forms === null ||
+    forms.length > MAX_BLOCKED_FORMS ||
+    !forms.every((form) => HASH_PATTERN.test(form))
+  ) {
+    return null;
+  }
+  return {
+    event: 'net.blocked',
+    tier,
+    ...base,
+    cause: cause as NetBlockCause,
+    emails: emails as number,
+    forms,
+  };
+}
+
 const WRITE_CHECKS: readonly string[] = ['full', 'sync', 'skipped'];
 const WRITE_RESULTS: readonly string[] = ['pass', 'block', 'possible'];
 
@@ -317,9 +377,7 @@ export function parseReport(detail: unknown): NetReport | null {
     transport: transport as NetTransport,
     category: category as NetCategory,
   };
-  if (r.event === 'net.blocked' && (r.tier === 1 || r.tier === 2)) {
-    return { event: 'net.blocked', tier: r.tier, ...base };
-  }
+  if (r.event === 'net.blocked') return parseBlocked(r, base);
   if (r.event === 'net.skipped-binary') {
     const { reason } = r;
     return typeof reason === 'string' && SKIP_REASONS.includes(reason)

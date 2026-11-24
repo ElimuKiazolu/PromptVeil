@@ -62,6 +62,11 @@ const SELECTORS = {
     // Earlier layouts.
     '[data-message-author-role="assistant"]',
   ],
+  // Editors on replies the user can type into: the writing card's editor
+  // view. Any other editable root inside a reply counts too (see
+  // cardEditorFor).
+  cardContainer: ['.writing-block-editor'],
+  editableRoot: ['[contenteditable="true"]', '[contenteditable=""]'],
 } as const;
 
 /**
@@ -91,6 +96,8 @@ const USER_MESSAGE = SELECTORS.userMessage.join(', ');
 const ASSISTANT_MESSAGE = SELECTORS.assistantMessage.join(', ');
 const ANY_MESSAGE = `${USER_MESSAGE}, ${ASSISTANT_MESSAGE}`;
 const EDIT_FORM = SELECTORS.editForm.join(', ');
+const CARD_CONTAINER = SELECTORS.cardContainer.join(', ');
+const EDITABLE_ROOT = SELECTORS.editableRoot.join(', ');
 
 const HOSTNAME = 'chatgpt.com';
 
@@ -341,7 +348,11 @@ function proseMirrorComposer(
   };
 }
 
-export function createChatGptAdapter(doc: Document = document): SiteAdapter {
+/** The ChatGPT adapter: every optional SiteAdapter part is implemented. */
+export type ChatGptAdapter = SiteAdapter &
+  Required<Pick<SiteAdapter, 'cardEditorFor' | 'readCardText'>>;
+
+export function createChatGptAdapter(doc: Document = document): ChatGptAdapter {
   const isInEditForm = (el: Element): boolean => el.closest(EDIT_FORM) !== null;
 
   // Fallback selectors must never pick up an edit box as the main editor.
@@ -418,5 +429,30 @@ export function createChatGptAdapter(doc: Document = document): SiteAdapter {
     isAssistantMessage(el) {
       return el.closest(ASSISTANT_MESSAGE) !== null;
     },
+
+    cardEditorFor(target) {
+      const el =
+        target instanceof Element
+          ? target
+          : target instanceof Node
+            ? target.parentElement
+            : null;
+      const root = el?.closest<HTMLElement>(EDITABLE_ROOT) ?? null;
+      if (root === null || this.composerFor(root) !== null) return null;
+      if (root.closest(CARD_CONTAINER) !== null) return root;
+      const message = outermostMessage(root);
+      return message !== null && message.closest(ASSISTANT_MESSAGE) !== null
+        ? root
+        : null;
+    },
+
+    // Blank paragraphs (and layout whitespace between blocks) carry nothing
+    // to check; each paragraph is its own block of text.
+    readCardText: (editor) =>
+      normalise(
+        blockLines(editor)
+          .filter((line) => line.trim() !== '')
+          .join('\n\n'),
+      ),
   };
 }

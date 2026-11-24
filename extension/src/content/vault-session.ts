@@ -371,6 +371,7 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
         real,
         boundary: boundaryFor(type, standIn),
         netForms: netForms(type, real, normalised),
+        entity: type,
         variants: variantsFor(type, standIn, normalised, parts),
       },
     });

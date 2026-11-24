@@ -1,3 +1,4 @@
+import type { EntityType } from '../../shared/entities.ts';
 import type { DateOrder } from '../dates/writing.ts';
 
 /**
@@ -29,6 +30,11 @@ export interface StandInMapping {
    * variants.ts. Without it, only the stand-in as shown (any case) restores.
    */
   readonly variants?: StandInVariants;
+  /**
+   * The value's type, for notices that name what a blocked request carried
+   * (never used for matching).
+   */
+  readonly entity?: EntityType;
 }
 
 /**

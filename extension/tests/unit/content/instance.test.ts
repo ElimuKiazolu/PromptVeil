@@ -23,6 +23,9 @@ const readyNet: NetBridge = {
   },
   sync: () => undefined,
   setVerifier: () => undefined,
+  onVerdict: () => undefined,
+  onReport: () => undefined,
+  valueOfForm: () => null,
 };
 
 describe('startInstance', () => {
@@ -222,6 +225,9 @@ describe('startInstance', () => {
       },
       sync,
       setVerifier: () => undefined,
+      onVerdict: () => undefined,
+      onReport: () => undefined,
+      valueOfForm: () => null,
     };
     const instance = start(undefined, pendingNet);
 
@@ -370,6 +376,9 @@ describe('startInstance with a vault session', () => {
         synced.push(mappings.map((mapping) => mapping.real));
       },
       setVerifier: () => undefined,
+      onVerdict: () => undefined,
+      onReport: () => undefined,
+      valueOfForm: () => null,
     };
     const source = {
       version: 1,

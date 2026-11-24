@@ -17,6 +17,7 @@ import { createFormHasher } from '@/src/core/net/hash.ts';
 import { createRollingHash, rollingBase } from '@/src/core/net/rolling.ts';
 import { isSpikeStandIn } from '@/src/core/spike-standin.ts';
 import type { CountryCode } from '@/src/shared/country.ts';
+import { MAX_BLOCKED_FORMS } from '@/src/shared/net-protocol.ts';
 import type { EntitySubtype, EntityType } from '@/src/shared/entities.ts';
 
 const KEY = 'c3'.repeat(32);
@@ -247,16 +248,63 @@ describe('decideRequest', () => {
         { all: ['dana@example.com'], user: ['dana@example.com'] },
         k,
       ),
-    ).toEqual({ block: true, tier: 1 });
+    ).toEqual({ block: true, tier: 1, emails: 1 });
   });
 
-  it('applies tier 2 to every request', () => {
+  it('counts the distinct emails of a tier-1 block', () => {
+    expect(
+      decideRequest(
+        {
+          all: [],
+          user: [
+            'dana@example.com and DANA@example.com',
+            'ops@example.org, standin.1@example.net',
+          ],
+        },
+        knowledge([], ['standin.1@example.net']),
+      ),
+    ).toEqual({ block: true, tier: 1, emails: 2 });
+  });
+
+  it('applies tier 2 to every request and lists the forms found', () => {
+    const k = knowledge(['dana@example.com']);
     expect(
       decideRequest(
         { all: ['https://x.example/?e=dana@example.com'], user: null },
-        knowledge(['dana@example.com']),
+        k,
       ),
-    ).toEqual({ block: true, tier: 2 });
+    ).toEqual({ block: true, tier: 2, forms: [...k.formHashes] });
+  });
+
+  it('lists each form of a tier-2 block once, every masked value found', () => {
+    const k = knowledge([
+      'dana@example.com',
+      { type: 'PHONE', value: '07400 123456' },
+    ]);
+    const verdict = decideRequest(
+      {
+        all: ['dana@example.com twice: DANA@EXAMPLE.COM', 'call 07400-123-456'],
+        user: null,
+      },
+      k,
+    );
+    expect(
+      verdict.block && verdict.tier === 2 && [...verdict.forms].sort(),
+    ).toEqual([...k.formHashes].sort());
+  });
+
+  it('caps the forms a tier-2 block lists', () => {
+    const emails = Array.from(
+      { length: MAX_BLOCKED_FORMS + 5 },
+      (_, i) => `person${i.toString()}@example.com`,
+    );
+    const verdict = decideRequest(
+      { all: [emails.join(' ')], user: null },
+      knowledge(emails),
+    );
+    expect(verdict.block && verdict.tier === 2 && verdict.forms.length).toBe(
+      MAX_BLOCKED_FORMS,
+    );
   });
 
   it('allows a masked message', () => {

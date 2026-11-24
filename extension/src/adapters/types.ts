@@ -49,6 +49,14 @@ export interface SiteAdapter {
    * Without it, a reply counts as finished after a quiet period.
    */
   isReplyComplete?(container: HTMLElement): boolean;
+  /**
+   * The editable root of a card editor on a reply (e.g. ChatGPT's writing
+   * card) that `target` is in, or null. Composers and edit boxes are not
+   * cards. Card editors are only ever read, never changed.
+   */
+  cardEditorFor?(target: EventTarget | null): HTMLElement | null;
+  /** A card editor's text, paragraphs separated by blank lines. */
+  readCardText?(editor: HTMLElement): string;
 }
 
 /** A site surface whose writes carry text the user typed. */

@@ -7,6 +7,7 @@ import {
   parseAddition,
   parseVerdict,
   type NetAddition,
+  type NetCategory,
   type NetReport,
 } from '@/src/shared/net-protocol.ts';
 import { originalFunction } from './wrappers.ts';
@@ -27,7 +28,11 @@ export interface MainChannel {
    * Asks the isolated side whether the user's text may be sent. Blocks
    * without an answer within `timeoutMs`, or before the handshake.
    */
-  verify(texts: readonly string[], timeoutMs: number): Promise<VerifyOutcome>;
+  verify(
+    texts: readonly string[],
+    category: NetCategory,
+    timeoutMs: number,
+  ): Promise<VerifyOutcome>;
 }
 
 export interface MainChannelHandlers {
@@ -104,7 +109,7 @@ export function startMainChannel(
         }),
       );
     },
-    verify(texts, timeoutMs) {
+    verify(texts, category, timeoutMs) {
       if (key === null) return Promise.resolve(NO_ANSWER);
       const id = nextId;
       nextId += 1;
@@ -117,7 +122,7 @@ export function startMainChannel(
       dispatch.call(
         doc,
         new CustomEventCtor(netChannelEvent(key, 'verify'), {
-          detail: JSON.stringify({ id, texts }),
+          detail: JSON.stringify({ id, texts, category }),
         }),
       );
       return answer;

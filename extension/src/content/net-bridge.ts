@@ -5,7 +5,9 @@ import {
   randomHashKey,
 } from '@/src/core/net/hash.ts';
 import { createRollingHash, rollingBase } from '@/src/core/net/rolling.ts';
+import type { NoticeItem } from '@/src/core/notice/text.ts';
 import type { StandInMapping } from '@/src/core/restore/index.ts';
+import type { EntityType } from '@/src/shared/entities.ts';
 import { devlog, type DevDetails } from '@/src/shared/devlog.ts';
 import {
   NET_KEY_OFFER,
@@ -15,6 +17,7 @@ import {
   parseReport,
   parseVerifyRequest,
   type NetAddition,
+  type NetCategory,
   type NetReport,
 } from '@/src/shared/net-protocol.ts';
 
@@ -24,6 +27,8 @@ export interface VerifierResult {
   readonly block: boolean;
   /** "possible" values found (counted, never blocked). */
   readonly possible: number;
+  /** What blocks it, by kind (for the notice). */
+  readonly items: readonly NoticeItem[];
 }
 
 /**
@@ -32,7 +37,23 @@ export interface VerifierResult {
  */
 export type MessageVerifier = (
   texts: readonly string[],
+  category: NetCategory,
 ) => Promise<VerifierResult>;
+
+/**
+ * The outcome of a verify request, for notices: the verifier's result, or
+ * null when it failed (the write was blocked unchecked).
+ */
+/** Who a keyed form belongs to (no real value). */
+export interface FormOwner {
+  readonly type: EntityType;
+  readonly standIn: string;
+}
+
+export type VerdictListener = (
+  category: NetCategory,
+  result: VerifierResult | null,
+) => void;
 
 /** A report from the net as dev-log details (fixed codes only). */
 function reportDetails(report: NetReport): DevDetails {
@@ -89,6 +110,15 @@ export interface NetBridge {
    * blocked.
    */
   setVerifier(verifier: MessageVerifier): void;
+  /** Every verify outcome (after the net was answered). */
+  onVerdict(listener: VerdictListener): void;
+  /** Every report from the net, parsed (production reports included). */
+  onReport(listener: (report: NetReport) => void): void;
+  /**
+   * The masked value a keyed form hash belongs to: its type and its
+   * stand-in (which tells values apart; a value can have several forms).
+   */
+  valueOfForm(hash: string): FormOwner | null;
 }
 
 function formsOf(mapping: StandInMapping): readonly string[] {
@@ -111,6 +141,9 @@ export function startNetBridge(doc: Document = document): NetBridge {
   let verifier: MessageVerifier | null = null;
   const waiting: (() => void)[] = [];
   const synced = new Set<string>();
+  const ownerByHash = new Map<string, FormOwner>();
+  const verdictListeners: VerdictListener[] = [];
+  const reportListeners: ((report: NetReport) => void)[] = [];
 
   const bridge: NetBridge = {
     isReady: () => ready,
@@ -125,10 +158,17 @@ export function startNetBridge(doc: Document = document): NetBridge {
         if (synced.has(mapping.standIn)) continue;
         synced.add(mapping.standIn);
         for (const form of formsOf(mapping)) {
+          const formHash = hash(form);
+          if (mapping.entity !== undefined) {
+            ownerByHash.set(formHash, {
+              type: mapping.entity,
+              standIn: mapping.standIn,
+            });
+          }
           addition.forms.push({
             length: form.length,
             roll: rolling.of(form),
-            hash: hash(form),
+            hash: formHash,
           });
         }
         // Tier 1's email check lets the email stand-ins through.
@@ -149,6 +189,17 @@ export function startNetBridge(doc: Document = document): NetBridge {
     setVerifier(next) {
       verifier = next;
     },
+    onVerdict(listener) {
+      verdictListeners.push(listener);
+    },
+    onReport(listener) {
+      reportListeners.push(listener);
+    },
+    valueOfForm: (formHash) => ownerByHash.get(formHash) ?? null,
+  };
+
+  const tell = (category: NetCategory, result: VerifierResult | null): void => {
+    for (const listener of verdictListeners) listener(category, result);
   };
 
   const answer = (id: number, result: VerifierResult): void => {
@@ -162,7 +213,7 @@ export function startNetBridge(doc: Document = document): NetBridge {
       }),
     );
   };
-  const BLOCK: VerifierResult = { block: true, possible: 0 };
+  const BLOCK: VerifierResult = { block: true, possible: 0, items: [] };
 
   if (!isHandshakeWindowOpen(doc)) {
     devlog('net.missing');
@@ -193,6 +244,7 @@ export function startNetBridge(doc: Document = document): NetBridge {
     const report = parseReport(event.detail);
     if (!report) return;
     devlog(report.event, reportDetails(report));
+    for (const listener of reportListeners) listener(report);
   });
   doc.addEventListener(netChannelEvent(key, 'verify'), (event) => {
     if (!(event instanceof CustomEvent)) return;
@@ -201,15 +253,18 @@ export function startNetBridge(doc: Document = document): NetBridge {
     const current = verifier;
     if (current === null) {
       answer(request.id, BLOCK);
+      tell(request.category, null);
       return;
     }
-    current(request.texts).then(
+    current(request.texts, request.category).then(
       (result) => {
         answer(request.id, result);
+        tell(request.category, result);
       },
       (error: unknown) => {
         devlog('net.failed', { error });
         answer(request.id, BLOCK);
+        tell(request.category, null);
       },
     );
   });

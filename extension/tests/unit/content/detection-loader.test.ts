@@ -190,6 +190,9 @@ describe('a Send before detection is ready', () => {
     },
     sync: () => undefined,
     setVerifier: () => undefined,
+    onVerdict: () => undefined,
+    onReport: () => undefined,
+    valueOfForm: () => null,
   };
 
   function start(load: () => Promise<unknown>) {

@@ -12,6 +12,7 @@
  * paragraph boundary is counted once.
  */
 import type { Detection } from '../../shared/entities.ts';
+import { countItems, type NoticeItem } from '../notice/text.ts';
 
 /**
  * Text kept on each side of a paragraph: at least the widest context
@@ -57,6 +58,8 @@ export interface WriteCheckResult {
   readonly block: boolean;
   /** "possible" detections of masked types (logged, never blocked). */
   readonly possible: number;
+  /** The blocking values by kind, each distinct value once (for notices). */
+  readonly items: readonly NoticeItem[];
 }
 
 export interface WriteCheckOptions {
@@ -69,14 +72,17 @@ export interface WriteCheckOptions {
 }
 
 /**
- * Checks every text; stops at the first value that blocks. Any failure of
- * the scanner rejects, and the caller blocks the request.
+ * Checks every text and counts what blocks it, by kind (a value written
+ * several times counts once). Any failure of the scanner rejects, and the
+ * caller blocks the request.
  */
 export async function checkUserTexts(
   texts: readonly string[],
   options: WriteCheckOptions,
 ): Promise<WriteCheckResult> {
   let possible = 0;
+  // Distinct values, in memory only; the result carries kinds and counts.
+  const blocking = new Map<string, Detection>();
   for (const text of texts) {
     for (const window of paragraphWindows(text)) {
       const found = await options.scan(window.text);
@@ -84,8 +90,14 @@ export async function checkUserTexts(
         if (detection.start < window.start || detection.start >= window.end) {
           continue;
         }
-        if (options.needsMasking(detection)) return { block: true, possible };
-        if (
+        if (options.needsMasking(detection)) {
+          const key = JSON.stringify([
+            detection.type,
+            detection.subtype,
+            detection.value,
+          ]);
+          blocking.set(key, detection);
+        } else if (
           detection.status === 'possible' &&
           options.isMaskedType(detection)
         ) {
@@ -94,5 +106,9 @@ export async function checkUserTexts(
       }
     }
   }
-  return { block: false, possible };
+  return {
+    block: blocking.size > 0,
+    possible,
+    items: countItems([...blocking.values()]),
+  };
 }

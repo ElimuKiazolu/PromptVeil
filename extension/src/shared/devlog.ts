@@ -14,6 +14,7 @@ import type {
   NetWriteResult,
 } from './net-protocol.ts';
 import type { VaultFailureCode } from './vault-protocol.ts';
+import type { NoticeSurface } from '../core/notice/text.ts';
 
 export type DevEvent =
   | 'instance.starting'
@@ -60,6 +61,9 @@ export type DevEvent =
   | 'vault.cleaned'
   | 'vault.deleted-all'
   | 'notice.failed'
+  | 'write-notice.shown'
+  | 'write-notice.hidden'
+  | 'write-notice.scanned'
   | 'session.conversation'
   | 'session.loaded'
   | 'session.failed'
@@ -120,6 +124,8 @@ export interface DevDetails {
   tier?: 1 | 2;
   category?: NetCategory;
   transport?: NetTransport;
+  /** Which notice (write notices): card, message or write. */
+  surface?: NoticeSurface;
   /** Why a request body was not read. */
   skip?: NetSkipReason;
   /**
@@ -170,6 +176,7 @@ export function devlog(event: DevEvent, details: DevDetails = {}): void {
     parts.push(`transport=${details.transport}`);
   }
   if (details.skip !== undefined) parts.push(`skip=${details.skip}`);
+  if (details.surface !== undefined) parts.push(`surface=${details.surface}`);
   if (details.write !== undefined) {
     const w = details.write;
     parts.push(
