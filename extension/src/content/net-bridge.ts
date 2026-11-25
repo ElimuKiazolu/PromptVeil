@@ -29,6 +29,11 @@ export interface VerifierResult {
   readonly possible: number;
   /** What blocks it, by kind (for the notice). */
   readonly items: readonly NoticeItem[];
+  /**
+   * Keyed hashes of the compact forms of the values that block it (the
+   * channel key), so a notice can tell whether the user typed them.
+   */
+  readonly hashes: readonly string[];
 }
 
 /**
@@ -119,6 +124,8 @@ export interface NetBridge {
    * stand-in (which tells values apart; a value can have several forms).
    */
   valueOfForm(hash: string): FormOwner | null;
+  /** The keyed hash of a compact form, as the net computes it. */
+  hashForm(form: string): string;
 }
 
 function formsOf(mapping: StandInMapping): readonly string[] {
@@ -196,6 +203,7 @@ export function startNetBridge(doc: Document = document): NetBridge {
       reportListeners.push(listener);
     },
     valueOfForm: (formHash) => ownerByHash.get(formHash) ?? null,
+    hashForm: (form) => hash(form),
   };
 
   const tell = (category: NetCategory, result: VerifierResult | null): void => {
@@ -213,7 +221,12 @@ export function startNetBridge(doc: Document = document): NetBridge {
       }),
     );
   };
-  const BLOCK: VerifierResult = { block: true, possible: 0, items: [] };
+  const BLOCK: VerifierResult = {
+    block: true,
+    possible: 0,
+    items: [],
+    hashes: [],
+  };
 
   if (!isHandshakeWindowOpen(doc)) {
     devlog('net.missing');

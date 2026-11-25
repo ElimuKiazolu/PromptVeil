@@ -58,6 +58,11 @@ function setUp(
   const shown = new Map<string, Shown>();
   const calls: string[] = [];
   const dispose = vi.fn();
+  /** Keyed hashes the scan of typed text returns (stand-ins for the real). */
+  let typedHashes: string[] = [];
+  const scanTyped = vi.fn<(text: string) => Promise<string[]>>(() =>
+    Promise.resolve(typedHashes),
+  );
   let dismiss: (key: string) => void = () => undefined;
   const layer: NoticeLayer = {
     show(key, content, placement, announce) {
@@ -82,6 +87,7 @@ function setUp(
       return layer;
     },
     scanCard,
+    scanTyped,
     signal: controller.signal,
     now: () => time,
     pauseMs: 300,
@@ -96,6 +102,19 @@ function setUp(
     owners,
     controller,
     scanCard,
+    scanTyped,
+    /** The values the next typed text holds, as keyed hashes. */
+    typedValues: (hashes: string[]) => {
+      typedHashes = hashes;
+    },
+    /** Types into a plain input (e.g. a rename field). */
+    typeInInput: (value: string, type = 'text') => {
+      const input = document.createElement('input');
+      input.type = type;
+      input.value = value;
+      document.body.append(input);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    },
     advance: (ms: number) => {
       time += ms;
     },
@@ -114,7 +133,7 @@ function setUp(
       }
     },
     verdict: (
-      category: 'writing-block' | 'write',
+      category: 'writing-block' | 'write' | 'background',
       result: VerifierResult | null,
     ) => {
       for (const listener of verdictListeners) listener(category, result);
@@ -140,7 +159,12 @@ describe('write notices', () => {
   it('puts a blocked card save under the card the user typed in', () => {
     const t = setUp();
     t.typeInCard();
-    t.verdict('writing-block', { block: true, possible: 0, items: [EMAIL] });
+    t.verdict('writing-block', {
+      block: true,
+      possible: 0,
+      items: [EMAIL],
+      hashes: [],
+    });
     const [notice] = [...t.shown.values()];
     expect(notice?.content.title).toBe("This edit wasn't saved");
     expect(notice?.placement).toEqual({ kind: 'card', anchor: t.card });
@@ -150,9 +174,19 @@ describe('write notices', () => {
   it('hides the card notice when a later save of that card passes', () => {
     const t = setUp();
     t.typeInCard();
-    t.verdict('writing-block', { block: true, possible: 0, items: [EMAIL] });
+    t.verdict('writing-block', {
+      block: true,
+      possible: 0,
+      items: [EMAIL],
+      hashes: [],
+    });
     t.typeInCard();
-    t.verdict('writing-block', { block: false, possible: 0, items: [] });
+    t.verdict('writing-block', {
+      block: false,
+      possible: 0,
+      items: [],
+      hashes: [],
+    });
     expect(t.shown.size).toBe(0);
   });
 
@@ -160,25 +194,84 @@ describe('write notices', () => {
     const t = setUp();
     for (let i = 0; i < 5; i += 1) {
       t.typeInCard();
-      t.verdict('writing-block', { block: true, possible: 0, items: [EMAIL] });
+      t.verdict('writing-block', {
+        block: true,
+        possible: 0,
+        items: [EMAIL],
+        hashes: [],
+      });
     }
     expect(t.calls).toEqual(['show card:1']);
   });
 
-  it('shows a page-level notice for other writes after user activity only', () => {
+  it('never shows the site background writes, even right after typing', async () => {
+    vi.useFakeTimers();
     const t = setUp();
-    t.report({ category: 'write', emails: 2 });
-    expect(t.shown.size).toBe(0);
+    t.typedValues(['a'.repeat(64)]);
+    t.typeInInput('Notes for someone');
+    await vi.advanceTimersByTimeAsync(300);
+    t.report({ category: 'background', forms: ['a'.repeat(64)] });
+    t.verdict('background', {
+      block: true,
+      possible: 0,
+      items: [EMAIL],
+      hashes: ['a'.repeat(64)],
+    });
+    expect(t.calls).toEqual([]);
+  });
+
+  it('shows another write only when it carries what the user just typed', async () => {
+    vi.useFakeTimers();
+    const t = setUp();
+    // Activity without a matching typed value: silent.
     t.click();
-    t.report({ category: 'write', emails: 2 });
+    t.report({ category: 'write', emails: 2, forms: ['a'.repeat(64)] });
+    expect(t.shown.size).toBe(0);
+    // The user typed that value: shown.
+    t.typedValues(['a'.repeat(64)]);
+    t.typeInInput('Notes for someone');
+    await vi.advanceTimersByTimeAsync(300);
+    t.report({
+      category: 'write',
+      emails: 2,
+      forms: ['b'.repeat(64), 'a'.repeat(64)],
+    });
     expect(t.shown.get('page:write')?.content.body).toBe(
       'Something you typed has 2 emails. PromptVeil stopped ChatGPT from storing it. Remove it and try again.',
     );
     expect(t.shown.get('page:write')?.placement).toEqual({ kind: 'page' });
-    // Activity long ago: a background request stays silent.
+  });
+
+  it('forgets typed values after the activity window', async () => {
+    vi.useFakeTimers();
+    const t = setUp();
+    t.typedValues(['a'.repeat(64)]);
+    t.typeInInput('Notes for someone');
+    await vi.advanceTimersByTimeAsync(300);
     t.advance(ACTIVITY_RECENT_MS + 1);
+    t.click();
+    t.report({ category: 'write', forms: ['a'.repeat(64)] });
+    expect(t.shown.size).toBe(0);
+  });
+
+  it('never reads password fields', async () => {
+    vi.useFakeTimers();
+    const t = setUp();
+    t.typeInInput('hunter2 secret', 'password');
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(t.scanTyped).not.toHaveBeenCalled();
+  });
+
+  it('shows a message notice after user activity only', () => {
+    const t = setUp();
     t.report({ category: 'message', emails: 1 });
-    expect(t.shown.has('page:message')).toBe(false);
+    expect(t.shown.size).toBe(0);
+    t.click();
+    t.report({ category: 'message', emails: 1 });
+    expect(t.shown.get('page:message')?.content.title).toBe('Message not sent');
+    t.advance(ACTIVITY_RECENT_MS + 1);
+    t.verdict('write', null);
+    expect(t.shown.has('page:write')).toBe(false);
   });
 
   it('moves a card save to page level once the card edit is old', () => {
@@ -186,16 +279,24 @@ describe('write notices', () => {
     t.typeInCard();
     t.advance(CARD_RECENT_MS + 1);
     t.click();
-    t.verdict('writing-block', { block: true, possible: 0, items: [EMAIL] });
+    t.verdict('writing-block', {
+      block: true,
+      possible: 0,
+      items: [EMAIL],
+      hashes: [],
+    });
     expect(t.shown.get('page:card')?.placement).toEqual({ kind: 'page' });
   });
 
-  it('names values masked earlier by type, each value once', () => {
+  it('names values masked earlier by type, each value once', async () => {
+    vi.useFakeTimers();
     const t = setUp();
     t.owners.set('a'.repeat(64), { type: 'PHONE', standIn: '07700 900123' });
     t.owners.set('b'.repeat(64), { type: 'PHONE', standIn: '07700 900123' });
     t.owners.set('c'.repeat(64), { type: 'EMAIL', standIn: 'x@example.net' });
-    t.click();
+    t.typedValues(['a'.repeat(64)]);
+    t.typeInInput('call 07400 123456');
+    await vi.advanceTimersByTimeAsync(300);
     t.report({
       tier: 2,
       cause: 'masked',
@@ -207,17 +308,16 @@ describe('write notices', () => {
     );
   });
 
-  it('says a write could not be checked when no types are known', () => {
+  it('says a message could not be checked; an unknown unchecked write stays silent', () => {
     const t = setUp();
     t.click();
     t.report({ cause: 'unreadable', emails: 0 });
-    expect(t.shown.get('page:write')?.content.body).toBe(
+    t.verdict('write', null);
+    expect(t.calls).toEqual([]);
+    t.report({ event: 'net.failed', category: 'message', transport: 'fetch' });
+    expect(t.shown.get('page:message')?.content.body).toBe(
       "PromptVeil couldn't check it, so it wasn't sent or saved.",
     );
-    t.verdict('write', null);
-    expect(t.calls).toEqual(['show page:write']);
-    t.report({ event: 'net.failed', category: 'message', transport: 'fetch' });
-    expect(t.shown.get('page:message')?.content.title).toBe('Message not sent');
   });
 
   it('leaves blocks the full check explained to the verdict', () => {
@@ -230,10 +330,10 @@ describe('write notices', () => {
   it('keeps a dismissed notice closed for the same kinds', () => {
     const t = setUp();
     t.click();
-    t.report({ category: 'write', emails: 1 });
-    t.dismiss('page:write');
+    t.report({ category: 'message', emails: 1 });
+    t.dismiss('page:message');
     expect(t.shown.size).toBe(0);
-    t.report({ category: 'write', emails: 1 });
+    t.report({ category: 'message', emails: 1 });
     expect(t.shown.size).toBe(0);
   });
 
@@ -281,5 +381,19 @@ describe('write notices', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(t.scanCard).not.toHaveBeenCalled();
     expect(t.dispose).toHaveBeenCalled();
+  });
+});
+
+describe('write notices: save straight after typing', () => {
+  it('scans typed text at once when an unknown write is stopped before the pause', async () => {
+    vi.useFakeTimers();
+    const t = setUp();
+    t.typedValues(['a'.repeat(64)]);
+    t.typeInInput('Notes for someone');
+    // The site saves before the 300 ms pause has passed.
+    t.report({ category: 'write', emails: 1, forms: ['a'.repeat(64)] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.scanTyped).toHaveBeenCalledTimes(1);
+    expect(t.shown.get('page:write')?.content.title).toBe('Not saved');
   });
 });

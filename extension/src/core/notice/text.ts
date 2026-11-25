@@ -18,13 +18,18 @@ import type { NetCategory } from '../../shared/net-protocol.ts';
  */
 export type NoticeSurface = 'card' | 'message' | 'write';
 
-/** The notice surface of a write the net saw (see NetCategory). */
-export function noticeSurfaceFor(category: NetCategory): NoticeSurface {
+/**
+ * The notice surface of a write the net saw (see NetCategory); null for the
+ * site's own background writes, which are blocked without a notice.
+ */
+export function noticeSurfaceFor(category: NetCategory): NoticeSurface | null {
   switch (category) {
     case 'writing-block':
       return 'card';
     case 'message':
       return 'message';
+    case 'background':
+      return null;
     case 'write':
     case 'other':
       return 'write';
@@ -33,6 +38,12 @@ export function noticeSurfaceFor(category: NetCategory): NoticeSurface {
 
 /** Early warning while typing (cards only), or a write that was stopped. */
 export type NoticeState = 'warning' | 'blocked';
+
+/**
+ * How a notice is coloured: a warning (nothing lost yet) or an error (a
+ * write was stopped and is not saved).
+ */
+export type NoticeTone = 'warning' | 'error';
 
 /**
  * found: values the detector (or the email check) found in the user's text.

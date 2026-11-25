@@ -29,7 +29,12 @@ const DANA: StandInMapping = {
 
 const VALID_KEY = 'ab'.repeat(32);
 
-const PASS: VerifierResult = { block: false, possible: 0, items: [] };
+const PASS: VerifierResult = {
+  block: false,
+  possible: 0,
+  items: [],
+  hashes: [],
+};
 
 /** MAIN-channel handlers that do nothing, with a real timer. */
 function handlers() {
@@ -345,6 +350,7 @@ describe('installNetGuard', () => {
         block: texts.some((t) => t.includes('AB 12 34 56 C')),
         possible: 0,
         items: [],
+        hashes: [],
       });
     });
     await expect(
@@ -454,7 +460,10 @@ describe('block reports for notices', () => {
         transport: 'xhr',
         cause: 'email',
         emails: 2,
-        forms: [],
+        forms: [
+          expect.stringMatching(/^[0-9a-f]{64}$/),
+          expect.stringMatching(/^[0-9a-f]{64}$/),
+        ],
       },
     ]);
   });
@@ -482,7 +491,7 @@ describe('block reports for notices', () => {
     const { win, bridge, reports, verdicts } = setUp();
     const items = [{ type: 'PHONE' as const, subtype: null, count: 1 }];
     bridge.setVerifier(() =>
-      Promise.resolve({ block: true, possible: 0, items }),
+      Promise.resolve({ block: true, possible: 0, items, hashes: [] }),
     );
     await expect(
       win.fetch('/backend-api/conversation/abc/writing-blocks', {
@@ -491,7 +500,7 @@ describe('block reports for notices', () => {
       }),
     ).rejects.toThrow(TypeError);
     expect(verdicts).toEqual([
-      ['writing-block', { block: true, possible: 0, items }],
+      ['writing-block', { block: true, possible: 0, items, hashes: [] }],
     ]);
     expect(blockedReports(reports)).toMatchObject([
       { cause: 'verified', category: 'writing-block', transport: 'fetch' },

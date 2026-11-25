@@ -60,6 +60,11 @@ export interface WriteCheckResult {
   readonly possible: number;
   /** The blocking values by kind, each distinct value once (for notices). */
   readonly items: readonly NoticeItem[];
+  /**
+   * The blocking values themselves, each once, in memory only: the caller
+   * turns them into keyed hashes and drops them.
+   */
+  readonly values: readonly string[];
 }
 
 export interface WriteCheckOptions {
@@ -110,5 +115,6 @@ export async function checkUserTexts(
     block: blocking.size > 0,
     possible,
     items: countItems([...blocking.values()]),
+    values: [...new Set([...blocking.values()].map((found) => found.value))],
   };
 }

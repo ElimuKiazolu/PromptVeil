@@ -4,6 +4,7 @@ import {
   type Composer,
   type ComposerKind,
   type NetEndpoint,
+  type NetBackground,
   type NetSkip,
   type SiteAdapter,
   type SiteNetRules,
@@ -266,6 +267,35 @@ const ENDPOINTS: readonly NetEndpoint[] = [
  */
 const SKIP: readonly NetSkip[] = [];
 
+/**
+ * ChatGPT's own background writes: checked and blocked like every write,
+ * but never shown to the user, who did not cause them. Each entry names its
+ * evidence; matched on first-party hosts only (isFirstPartyWrite).
+ */
+const BACKGROUND: readonly NetBackground[] = [
+  // Statsig event batches: POST …/ces/v1/rgstr, gzip JSON with events[]
+  // (@statsig/client-core 3.33.8 source, P6.3; live 3a9bcb0: blocked
+  // repeatedly after a card edit and again after a browser restart, because
+  // the SDK stores failed batches and retries them).
+  {
+    matches: (url, method) =>
+      method === 'POST' && /\/ces\/v1\/rgstr\/?$/.test(url.pathname),
+  },
+  // Telemetry intake: POST /v1/telemetry/intake, text body (live 3a9bcb0,
+  // blocked with the Statsig batches, no user action).
+  {
+    matches: (url, method) =>
+      method === 'POST' && url.pathname === '/v1/telemetry/intake',
+  },
+  // Anti-abuse checks before a message: POST /backend-api/sentinel/…, e.g.
+  // chat-requirements/finalize with prepare_token, proofofwork, turnstile
+  // (live 3a9bcb0, during an ordinary masked send).
+  {
+    matches: (url, method) =>
+      method === 'POST' && url.pathname.startsWith('/backend-api/sentinel/'),
+  },
+];
+
 const isChatGptHost = (hostname: string): boolean =>
   hostname === NET.hostname || hostname.endsWith(`.${NET.hostname}`);
 
@@ -278,6 +308,7 @@ export const chatgptNetRules: SiteNetRules = {
     isChatGptHost(url.hostname) && NET.writeMethods.has(method),
   endpoints: ENDPOINTS,
   skip: SKIP,
+  background: BACKGROUND,
 };
 
 /**

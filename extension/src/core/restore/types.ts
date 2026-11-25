@@ -12,8 +12,12 @@ import type { DateOrder } from '../dates/writing.ts';
  * - 'exact': like 'word', and written exactly as the stand-in: a value whose
  *   case is part of it (a Base58 address in another case is another,
  *   invalid address).
+ * - 'derived': like 'word', for a name a reply derives from an email
+ *   stand-in's local part ("hale" in kai_hale@… shown as "Hale"): written
+ *   capitalised or in capitals (in lower case it is an ordinary word); the
+ *   real piece comes back in the same case.
  */
-export type BoundaryRule = 'email' | 'word' | 'name' | 'exact';
+export type BoundaryRule = 'email' | 'word' | 'name' | 'exact' | 'derived';
 
 /** One stand-in shown to the chatbot and the real value it replaced. */
 export interface StandInMapping {

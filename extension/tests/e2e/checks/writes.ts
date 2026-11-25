@@ -39,8 +39,15 @@ function cardBlock(id: string, title: string, typed: () => string): Check {
         await chatWithCard(h, tab, id);
         const before = h.site.requests.length;
         const value = typed();
+        const mark = h.logs.mark();
         const outcome = await tab.typeInCard(` Reach me at ${value}.`);
         assert(outcome === 'failed', `the save was ${outcome}`);
+        await h.logs.waitFor(
+          / net\.write category=writing-block .* result=block$/,
+          mark,
+          5_000,
+          'page',
+        );
         assert(
           !savedSince(h, before).some((body) => carries(body, value)),
           'the value reached the site',
@@ -98,8 +105,15 @@ export const writeChecks: readonly Check[] = [
       withTabs(async (track) => {
         const tab = track(await h.openTab());
         await chatWithCard(h, tab, 'card clean');
+        const mark = h.logs.mark();
         const outcome = await tab.typeInCard(' See you at 6 or 7 pm.');
         assert(outcome === 'saved', `the save was ${outcome}`);
+        await h.logs.waitFor(
+          / net\.write category=writing-block .* result=pass$/,
+          mark,
+          5_000,
+          'page',
+        );
         return undefined;
       }),
   },

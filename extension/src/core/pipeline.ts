@@ -322,10 +322,14 @@ export function fitsPrompt(
     !view.detected.has(form) &&
     !view.normalised.has(`${type}\u0000${standIn.normalised}`) &&
     !view.rest.includes(form) &&
-    standIn.parts.every((part) => {
-      const lower = part.toLowerCase();
-      return !view.nameParts.has(lower) && !view.words.has(lower);
-    })
+    // A person's stand-in parts never equal a real part or a prompt word
+    // (TR-S3); an email's pieces (stored for derived names) follow its
+    // person or the word lists and are checked when restoring instead.
+    (type !== 'PERSON' ||
+      standIn.parts.every((part) => {
+        const lower = part.toLowerCase();
+        return !view.nameParts.has(lower) && !view.words.has(lower);
+      }))
   );
 }
 

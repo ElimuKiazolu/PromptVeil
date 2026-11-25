@@ -224,6 +224,7 @@ export function installNetGuard(
         return verdict.tier === 1
           ? blocked(1, category, transport, 'email', {
               emails: verdict.emails,
+              forms: verdict.forms,
             })
           : blocked(2, category, transport, 'masked', {
               forms: verdict.forms,

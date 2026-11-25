@@ -32,6 +32,8 @@
   /* Mustard's hue at lower lightness: icons and marks on Mist (AA, 4.6:1). */
   --color-mustard-ink: #896610;
   --color-brick: #a3262a;
+  /* Brick's hue at higher lightness: marks on Night spruce (AA, 4.9:1). */
+  --color-brick-light: #db6266;
 
   --font-sans:
     'Instrument Sans', system-ui, -apple-system, 'Segoe UI', Roboto,

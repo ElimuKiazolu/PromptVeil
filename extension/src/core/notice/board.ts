@@ -15,6 +15,7 @@ import {
   type NoticeItem,
   type NoticeReason,
   type NoticeSurface,
+  type NoticeTone,
 } from './text.ts';
 
 export const ANNOUNCE_GAP_MS = 5_000;
@@ -26,6 +27,8 @@ export type NoticeView =
       readonly visible: true;
       readonly surface: NoticeSurface;
       readonly content: NoticeContent;
+      /** Warning (early warning) or error (a stopped write). */
+      readonly tone: NoticeTone;
       /** Read the text out (live region) this time. */
       readonly announce: boolean;
     };
@@ -130,7 +133,15 @@ export function createNoticeBoard(options: {
       entry.announced = text;
       entry.announcedAt = at;
     }
-    return { key, visible: true, surface: entry.surface, content, announce };
+    const tone: NoticeTone = entry.blocked === null ? 'warning' : 'error';
+    return {
+      key,
+      visible: true,
+      surface: entry.surface,
+      content,
+      tone,
+      announce,
+    };
   };
 
   return {

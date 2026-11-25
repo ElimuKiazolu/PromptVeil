@@ -33,6 +33,7 @@ export type DevEvent =
   | 'restore.applied'
   | 'restore.leak-check'
   | 'restore.protected'
+  | 'restore.unrestored'
   | 'net.ready'
   | 'net.missing'
   | 'net.blocked'
@@ -64,6 +65,8 @@ export type DevEvent =
   | 'write-notice.shown'
   | 'write-notice.hidden'
   | 'write-notice.scanned'
+  | 'write-notice.silent'
+  | 'write-check.blocked'
   | 'session.conversation'
   | 'session.loaded'
   | 'session.failed'
@@ -103,7 +106,10 @@ export type DevReason =
   | 'invalid-response'
   | 'keys-lost'
   | 'vault-error'
-  | 'count-mismatch';
+  | 'count-mismatch'
+  | 'no-mappings'
+  | 'decrypt-failed'
+  | 'no-match';
 
 const PREFIX = '[PromptVeil]';
 
@@ -124,6 +130,8 @@ export interface DevDetails {
   tier?: 1 | 2;
   category?: NetCategory;
   transport?: NetTransport;
+  /** Kinds of values a full check blocked for (type or type/subtype). */
+  kinds?: readonly string[];
   /** Which notice (write notices): card, message or write. */
   surface?: NoticeSurface;
   /** Why a request body was not read. */
@@ -177,6 +185,8 @@ export function devlog(event: DevEvent, details: DevDetails = {}): void {
   }
   if (details.skip !== undefined) parts.push(`skip=${details.skip}`);
   if (details.surface !== undefined) parts.push(`surface=${details.surface}`);
+  if (details.kinds !== undefined)
+    parts.push(`kinds=${details.kinds.join(',')}`);
   if (details.write !== undefined) {
     const w = details.write;
     parts.push(

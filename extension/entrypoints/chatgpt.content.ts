@@ -11,9 +11,14 @@ import {
 import { vaultLifecycle } from '@/src/content/vault-lifecycle.ts';
 import { createVaultSession } from '@/src/content/vault-session.ts';
 import { loadWordList } from '@/src/content/word-lists.ts';
+import {
+  createUnrestoredCheck,
+  type LoadOutcome,
+} from '@/src/content/unrestored-check.ts';
 import { startWriteNotices } from '@/src/content/write-notices.ts';
 import { createMainThreadYielder } from '@/src/content/yielder.ts';
 import { createCheckpoint } from '@/src/core/detect/schedule.ts';
+import { compactForm } from '@/src/core/net/compact.ts';
 import type { DetectionConfig } from '@/src/core/detect/bundle.ts';
 import {
   checkUserTexts,
@@ -109,6 +114,19 @@ export default defineContentScript({
         net.sync(mappings);
       },
       randomUUID: () => crypto.randomUUID(),
+      // Development builds: explain stand-ins left on screen after a load.
+      ...(import.meta.env.DEV
+        ? {
+            onLoaded: (outcome: LoadOutcome) => {
+              unrestoredCheck(outcome);
+            },
+          }
+        : {}),
+    });
+    const unrestoredCheck = createUnrestoredCheck({
+      adapter,
+      source: session.source,
+      signal: ctx.signal,
     });
     const pipeline = createPipeline({
       // A Send before the module is ready waits for it; if it cannot load,
@@ -173,7 +191,28 @@ export default defineContentScript({
     // First-party writes sent with fetch: the net asks whether the user's
     // text in them holds a value a send would have masked. A rejection
     // blocks the write.
-    net.setVerifier(async (texts) => checkUserTexts(texts, await writeCheck()));
+    /** Keyed hashes of blocking values: what the net reports, no text. */
+    const hashesOf = (values: readonly string[]): string[] =>
+      values.map((value) => net.hashForm(compactForm(value)));
+    net.setVerifier(async (texts, category) => {
+      const result = await checkUserTexts(texts, await writeCheck());
+      if (result.block) {
+        // Which kinds stopped it (codes only), e.g. to tell a false
+        // positive on a machine value from typed personal data.
+        devlog('write-check.blocked', {
+          category,
+          kinds: result.items.map((item) =>
+            item.subtype === null ? item.type : `${item.type}/${item.subtype}`,
+          ),
+        });
+      }
+      return {
+        block: result.block,
+        possible: result.possible,
+        items: result.items,
+        hashes: hashesOf(result.values),
+      };
+    });
     // Tells the user when a write was stopped, and warns while they type a
     // value into a card editor (read only).
     startWriteNotices({
@@ -189,6 +228,8 @@ export default defineContentScript({
         }),
       scanCard: async (text) =>
         (await checkUserTexts([text], await writeCheck())).items,
+      scanTyped: async (text) =>
+        hashesOf((await checkUserTexts([text], await writeCheck())).values),
       signal: ctx.signal,
       now: () => performance.now(),
     });

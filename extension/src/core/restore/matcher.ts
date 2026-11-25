@@ -40,6 +40,12 @@ const isCapitals = (text: string): boolean =>
  */
 function caseFits(shown: string, mapping: StandInMapping): boolean {
   if (mapping.boundary === 'exact') return shown === mapping.standIn;
+  // A derived name is capitalised or in capitals, as names are in prose;
+  // in lower case it is an ordinary word (hale, park).
+  if (mapping.boundary === 'derived') {
+    const shape = caseShape(shown);
+    return shape === 'capital' || shape === 'upper';
+  }
   return (
     mapping.boundary !== 'name' ||
     shown === mapping.standIn ||
@@ -47,10 +53,32 @@ function caseFits(shown: string, mapping: StandInMapping): boolean {
   );
 }
 
+/** How a derived name is written: lower case, capitalised or capitals. */
+function caseShape(shown: string): 'lower' | 'capital' | 'upper' | null {
+  if (shown === shown.toLowerCase()) return 'lower';
+  if (isCapitals(shown)) return 'upper';
+  const first = shown.charAt(0);
+  const rest = shown.slice(1);
+  return first !== first.toLowerCase() && rest === rest.toLowerCase()
+    ? 'capital'
+    : null;
+}
+
 /** An address or a name part shown in capitals comes back in capitals. */
 function realAsShown(shown: string, mapping: StandInMapping): string {
   if (mapping.boundary === 'word' || mapping.boundary === 'exact') {
     return mapping.real;
+  }
+  if (mapping.boundary === 'derived') {
+    const real = mapping.real.toLowerCase();
+    switch (caseShape(shown)) {
+      case 'upper':
+        return real.toUpperCase();
+      case 'capital':
+        return real.charAt(0).toUpperCase() + real.slice(1);
+      default:
+        return real;
+    }
   }
   return isCapitals(shown) ? mapping.real.toUpperCase() : mapping.real;
 }
@@ -170,7 +198,9 @@ export function createRestoreMatcher(
   const plain = createExactMatcher(
     all.filter(
       (mapping) =>
-        mapping.variants === undefined && mapping.boundary !== 'name',
+        mapping.variants === undefined &&
+        mapping.boundary !== 'name' &&
+        mapping.boundary !== 'derived',
     ),
   );
   const variants = createVariantFinder(all);

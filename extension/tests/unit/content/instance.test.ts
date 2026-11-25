@@ -26,6 +26,7 @@ const readyNet: NetBridge = {
   onVerdict: () => undefined,
   onReport: () => undefined,
   valueOfForm: () => null,
+  hashForm: (form: string) => form,
 };
 
 describe('startInstance', () => {
@@ -228,6 +229,7 @@ describe('startInstance', () => {
       onVerdict: () => undefined,
       onReport: () => undefined,
       valueOfForm: () => null,
+      hashForm: (form: string) => form,
     };
     const instance = start(undefined, pendingNet);
 
@@ -379,6 +381,7 @@ describe('startInstance with a vault session', () => {
       onVerdict: () => undefined,
       onReport: () => undefined,
       valueOfForm: () => null,
+      hashForm: (form: string) => form,
     };
     const source = {
       version: 1,

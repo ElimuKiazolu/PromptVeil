@@ -11,7 +11,7 @@
  * Text goes in through textContent only; notices carry fixed words and
  * counts, never values.
  */
-import type { NoticeContent } from '@/src/core/notice/text.ts';
+import type { NoticeContent, NoticeTone } from '@/src/core/notice/text.ts';
 import { tokenProperties } from '../tokens.ts';
 
 export type NoticePlacement =
@@ -34,6 +34,7 @@ export interface NoticeLayer {
     content: NoticeContent,
     placement: NoticePlacement,
     announce: boolean,
+    tone: NoticeTone,
   ): void;
   hide(key: string): void;
   dispose(): void;
@@ -56,7 +57,8 @@ export function noticeCss(): string {
   ${tokenProperties()}
   --notice-bg: var(--color-mist);
   --notice-fg: var(--color-graphite);
-  --notice-mark: var(--color-mustard-ink);
+  --notice-warning: var(--color-mustard-ink);
+  --notice-error: var(--color-brick);
   --notice-border: color-mix(in srgb, var(--color-spruce) 12%, transparent);
   --notice-focus: var(--color-spruce);
   font-family: ${FONT_STACK};
@@ -66,28 +68,38 @@ export function noticeCss(): string {
 .layer[data-theme='dark'] {
   --notice-bg: var(--color-night);
   --notice-fg: var(--color-mist);
-  --notice-mark: var(--color-mustard);
+  --notice-warning: var(--color-mustard);
+  --notice-error: var(--color-brick-light);
   --notice-border: color-mix(in srgb, var(--color-mist) 16%, transparent);
   --notice-focus: var(--color-mist);
 }
+/*
+ * The state colour rises from the bottom edge: a soft glow over the lowest
+ * quarter of the card (gone at the top of that band) and a border that takes
+ * the colour towards the bottom. Static, so reduced motion needs nothing.
+ */
 .notice {
+  --tone: var(--notice-warning);
   position: fixed;
   box-sizing: border-box;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: start;
   column-gap: 10px;
-  padding: 12px 12px 12px 14px;
-  border: 1px solid var(--notice-border);
-  border-left: 4px solid var(--notice-mark);
+  padding: 12px 12px 14px;
+  border: 1px solid transparent;
   border-radius: 10px;
-  background: var(--notice-bg);
+  background:
+    linear-gradient(to top, color-mix(in srgb, var(--tone) 16%, transparent), transparent 25%) padding-box,
+    linear-gradient(var(--notice-bg), var(--notice-bg)) padding-box,
+    linear-gradient(to top, color-mix(in srgb, var(--tone) 60%, var(--notice-bg)), var(--notice-border) 50%) border-box;
   color: var(--notice-fg);
   box-shadow: 0 6px 24px color-mix(in srgb, var(--color-night) 18%, transparent);
   pointer-events: auto;
 }
+.notice[data-tone='error'] { --tone: var(--notice-error); }
 .notice[hidden] { display: none; }
-.icon { width: 20px; height: 20px; color: var(--notice-mark); margin-top: 1px; }
+.icon { width: 20px; height: 20px; color: var(--tone); margin-top: 1px; }
 .title { margin: 0; font-size: 14px; font-weight: 500; }
 .body { margin: 2px 0 0; font-size: 13px; }
 .dismiss {
@@ -314,13 +326,14 @@ export function createNoticeLayer(options: NoticeLayerOptions): NoticeLayer {
   };
 
   return {
-    show(key, content, placement, announce) {
+    show(key, content, placement, announce, tone) {
       const notice = shown.get(key) ?? build(key);
       shown.set(key, notice);
       const previous = notice.placement;
       if (previous.kind === 'card') resizeObserver?.unobserve(previous.anchor);
       notice.placement = placement;
       if (placement.kind === 'card') resizeObserver?.observe(placement.anchor);
+      notice.el.setAttribute('data-tone', tone);
       notice.title.textContent = content.title;
       notice.body.textContent = content.body;
       if (announce && announcer !== null) {

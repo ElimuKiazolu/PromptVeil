@@ -17,6 +17,7 @@
  * the files `wordListsFor` names first (generation is synchronous; a list
  * that is not loaded throws, so the send is blocked).
  */
+import { emailNameParts } from '../names/email-parts.ts';
 import { normaliseReal } from '../detect/normal-form.ts';
 import {
   COUNTRY_PACKS,
@@ -253,7 +254,11 @@ export function generateStandIn(
     locale: generated.locale ?? null,
     parts:
       generated.parts ??
-      (request.type === 'PERSON' ? nameParts(generated.value) : []),
+      (request.type === 'PERSON'
+        ? nameParts(generated.value)
+        : request.type === 'EMAIL'
+          ? emailNameParts(generated.value)
+          : []),
     ...(generated.fallback === true ? { fallback: true } : {}),
   };
 }

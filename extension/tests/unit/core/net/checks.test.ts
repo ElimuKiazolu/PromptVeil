@@ -248,7 +248,12 @@ describe('decideRequest', () => {
         { all: ['dana@example.com'], user: ['dana@example.com'] },
         k,
       ),
-    ).toEqual({ block: true, tier: 1, emails: 1 });
+    ).toEqual({
+      block: true,
+      tier: 1,
+      emails: 1,
+      forms: [matcher.hash('danaexamplecom')],
+    });
   });
 
   it('counts the distinct emails of a tier-1 block', () => {
@@ -263,7 +268,13 @@ describe('decideRequest', () => {
         },
         knowledge([], ['standin.1@example.net']),
       ),
-    ).toEqual({ block: true, tier: 1, emails: 2 });
+    ).toEqual({
+      block: true,
+      tier: 1,
+      emails: 2,
+      // Keyed hashes of the compact forms, one per distinct email.
+      forms: [matcher.hash('danaexamplecom'), matcher.hash('opsexampleorg')],
+    });
   });
 
   it('applies tier 2 to every request and lists the forms found', () => {
@@ -416,5 +427,51 @@ describe('tier 2 on text the site escaped', () => {
     expect(
       violatesTier2(['Dear&#x20;team,&nbsp;the\\-plan&#x20;is&#x20;below'], k),
     ).toBe(false);
+  });
+});
+
+describe('background writes (P6.5 live evidence)', () => {
+  const describeWriteOf = (path: string, body: string) =>
+    requestTexts(
+      {
+        url: new URL(path, 'https://chatgpt.com'),
+        method: 'POST',
+        body: { texts: [body], skipped: null, encoding: null, form: false },
+      },
+      chatgptNetRules,
+    ).write;
+
+  it('classifies Statsig, telemetry intake and sentinel as background', () => {
+    for (const path of [
+      '/ces/v1/rgstr?k=client-key&gz=1',
+      '/v1/telemetry/intake',
+      '/backend-api/sentinel/chat-requirements/finalize',
+      '/backend-api/sentinel/chat-requirements',
+    ]) {
+      expect(describeWriteOf(path, '{"a":"b c"}')?.surface).toBe('background');
+    }
+  });
+
+  it('still reads their user text, so they are checked and blocked as before', () => {
+    const write = describeWriteOf(
+      '/ces/v1/rgstr',
+      JSON.stringify({
+        events: [{ metadata: { text: 'mail dana@example.com' } }],
+      }),
+    );
+    expect(write?.user).toContain('mail dana@example.com');
+    expect(
+      decideRequest({ all: [], user: write?.user ?? [] }, knowledge()).block,
+    ).toBe(true);
+  });
+
+  it('keeps other first-party writes as unknown writes', () => {
+    for (const path of [
+      '/backend-api/conversation/abc',
+      '/ces/v1/rgstr-other',
+      '/backend-api/sentinelx',
+    ]) {
+      expect(describeWriteOf(path, '{"title":"x"}')?.surface).toBe('write');
+    }
   });
 });

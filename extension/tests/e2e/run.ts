@@ -12,6 +12,7 @@
  */
 import { auditCheck } from './checks/audit.ts';
 import type { Check } from './checks/common.ts';
+import { liveFixChecks } from './checks/live-fixes.ts';
 import { maskingChecks } from './checks/masking.ts';
 import { noticeChecks } from './checks/notices.ts';
 import { sessionChecks } from './checks/session.ts';
@@ -27,6 +28,7 @@ const CHECKS: readonly Check[] = [
   ...timingChecks,
   ...writeChecks,
   ...noticeChecks,
+  ...liveFixChecks,
 ];
 
 interface Options {

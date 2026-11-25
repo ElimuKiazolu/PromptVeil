@@ -224,3 +224,41 @@ describe('createRestoreMatcher', () => {
     });
   });
 });
+
+describe('names derived from an email stand-in (P6.5)', () => {
+  const derived = (standIn: string, real: string): StandInMapping => ({
+    standIn,
+    real,
+    boundary: 'derived',
+    netForms: [],
+  });
+  const mappings = [
+    email('kai_hale@example.org', 'lee_park@example.com'),
+    derived('kai', 'lee'),
+    derived('hale', 'park'),
+  ];
+
+  it('restores a capitalised or capital name in the same case', () => {
+    expect(restore(mappings, 'Hi Hale,')).toBe('Hi Park,');
+    expect(restore(mappings, 'Dear Kai Hale')).toBe('Dear Lee Park');
+    expect(restore(mappings, 'HALE')).toBe('PARK');
+    expect(restore(mappings, "Hale's notes")).toBe("Park's notes");
+    expect(restore(mappings, 'Write to kai_hale@example.org')).toBe(
+      'Write to lee_park@example.com',
+    );
+  });
+
+  it('leaves lower case, glued and unrelated words alone', () => {
+    expect(restore(mappings, 'hale and hearty')).toBe('hale and hearty');
+    expect(restore(mappings, 'Hales, Whale, Kaitlyn')).toBe(
+      'Hales, Whale, Kaitlyn',
+    );
+    expect(restore(mappings, 'Nothing to see here.')).toBe(
+      'Nothing to see here.',
+    );
+  });
+
+  it('is not counted as a leak (the whole address is)', () => {
+    expect(createRestoreMatcher(mappings).countOccurrences('Hi Hale')).toBe(0);
+  });
+});

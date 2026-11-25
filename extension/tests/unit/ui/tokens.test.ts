@@ -40,3 +40,37 @@ describe('colour tokens', () => {
     ).toBeLessThan(1);
   });
 });
+
+describe('notice states (P6.5)', () => {
+  const t = COLOR_TOKENS;
+  /** color-mix(in srgb, top p%, base): channel-wise in sRGB. */
+  const mix = (top: string, p: number, base: string): string => {
+    const channel = (hex: string, i: number) =>
+      parseInt(hex.slice(i, i + 2), 16);
+    return `#${[1, 3, 5]
+      .map((i) =>
+        Math.round(channel(top, i) * p + channel(base, i) * (1 - p))
+          .toString(16)
+          .padStart(2, '0'),
+      )
+      .join('')}`;
+  };
+
+  it('give error marks AA contrast in both themes', () => {
+    expect(contrast(t.brick, t.mist)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(t['brick-light'], t.night)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('keep body text AA where the glow is strongest (bottom edge, 16 %)', () => {
+    for (const tone of [t['mustard-ink'], t.brick]) {
+      expect(
+        contrast(t.graphite, mix(tone, 0.16, t.mist)),
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+    for (const tone of [t.mustard, t['brick-light']]) {
+      expect(contrast(t.mist, mix(tone, 0.16, t.night))).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
+});

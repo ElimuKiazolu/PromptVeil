@@ -17,6 +17,10 @@ function decoded(url: string): string {
   }
 }
 
+/** The fixed form of a net.write dev line (see src/shared/devlog.ts). */
+const WRITE_LINE =
+  /^\[PromptVeil\] dev \w{4} net\.write category=[a-z-]+ transport=[a-z]+ method=[A-Z]+ path=[A-Za-z0-9/:_.-]* fields=[A-Za-z0-9_.?,-]* body=[a-z-]+ checked=(?:full|sync|skipped) result=(?:pass|block|possible)$/;
+
 export const auditCheck: Check = {
   id: 'audit',
   title:
@@ -40,15 +44,11 @@ export const auditCheck: Check = {
       );
       assert(!leaked, `a real value in a ${line.source} log line`);
     }
-    const writes = h.logs.matching(/ net\.write /);
-    const cardWrites = writes.filter((line) =>
-      line.text.includes('category=writing-block'),
-    );
-    if (cardWrites.length > 0) {
+    // Write lines carry fixed codes, key names and paths only.
+    for (const line of h.logs.matching(/ net\.write /)) {
       assert(
-        cardWrites.some((line) => line.text.includes('result=block')) &&
-          cardWrites.some((line) => line.text.includes('result=pass')),
-        'writing-block lines do not show both a blocked and a passed save',
+        WRITE_LINE.test(line.text),
+        'a net.write line is not in its fixed form',
       );
     }
     return Promise.resolve(

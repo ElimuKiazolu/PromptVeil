@@ -10,6 +10,7 @@ import {
   createVaultService,
   type VaultService,
 } from '@/src/core/vault/service.ts';
+import { emailNameParts } from '@/src/core/names/email-parts.ts';
 import { nameParts } from '@/src/core/names/parts.ts';
 import { issueStandIns, type IssuedStandIn } from '@/src/core/pipeline.ts';
 import { createRestoreMatcher } from '@/src/core/restore/index.ts';
@@ -273,5 +274,104 @@ describe('DOB mappings in the session', () => {
     const matcher = createRestoreMatcher(reloaded.source.mappings());
     const [found] = matcher.find('Born April 26, 1990.');
     expect(found?.real).toBe('March 12, 1990');
+  });
+});
+
+describe('names derived from email stand-ins (P6.5)', () => {
+  // Made-up addresses; the stand-ins are reserved-domain addresses.
+  const emailItem = (value: string): MaskItem => ({
+    type: 'EMAIL',
+    subtype: null,
+    country: null,
+    value,
+    normalised: value.toLowerCase(),
+  });
+
+  function maskEmails(
+    session: VaultSession,
+    items: MaskItem[],
+    standIns: string[],
+    storeParts: boolean,
+  ): Promise<IssuedStandIn[]> {
+    return session.mask(items, (vault) =>
+      issueStandIns(items, vault, {
+        standIn: (request) => {
+          const value =
+            standIns[items.findIndex((i) => i.value === request.value)] ?? '';
+          return {
+            value,
+            normalised: value.toLowerCase(),
+            reserved: false,
+            locale: 'en_GB',
+            parts: storeParts ? emailNameParts(value) : [],
+          };
+        },
+        fits: () => true,
+        now: 0,
+      }),
+    );
+  }
+
+  const restorer = (session: VaultSession) => {
+    const matcher = createRestoreMatcher(session.source.mappings());
+    return (text: string) => {
+      let out = text;
+      for (const found of matcher.find(text).reverse()) {
+        out = out.slice(0, found.start) + found.real + out.slice(found.end);
+      }
+      return out;
+    };
+  };
+
+  it('store the stand-in pieces and restore a derived greeting', async () => {
+    const { open, sent } = setUp();
+    const session = open();
+    await settle();
+    await maskEmails(
+      session,
+      [emailItem('lee_park@example.com')],
+      ['kai_hale@example.org'],
+      true,
+    );
+    // Only the stand-in's pieces are stored with the mapping.
+    expect(sent[0]?.map((entry) => entry.variants)).toEqual([['kai', 'hale']]);
+    const restore = restorer(session);
+    expect(restore('Hi Hale, thanks. Kai Hale, kai_hale@example.org')).toBe(
+      'Hi Park, thanks. Lee Park, lee_park@example.com',
+    );
+    expect(restore('hale and hearty')).toBe('hale and hearty');
+  });
+
+  it('take the pieces from the stand-in for mappings stored without them', async () => {
+    const { open } = setUp();
+    const first = open();
+    await settle();
+    await maskEmails(
+      first,
+      [emailItem('lee.park@example.com')],
+      ['kai.hale@example.org'],
+      false,
+    );
+    const second = open();
+    for (let i = 0; i < 200 && second.state().status !== 'ready'; i += 1) {
+      await settle();
+    }
+    expect(restorer(second)('Dear Hale')).toBe('Dear Park');
+  });
+
+  it('never restore a piece that is a real name piece in the conversation', async () => {
+    const { open } = setUp();
+    const session = open();
+    await settle();
+    // The stand-in for one address uses "park", the real piece of the other.
+    await maskEmails(
+      session,
+      [emailItem('lee_park@example.com'), emailItem('sam_ward@example.com')],
+      ['kai_hale@example.org', 'tom_park@example.net'],
+      true,
+    );
+    const restore = restorer(session);
+    expect(restore('Hi Park')).toBe('Hi Park');
+    expect(restore('Hi Hale')).toBe('Hi Park');
   });
 });

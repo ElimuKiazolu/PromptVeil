@@ -9,12 +9,14 @@ export type NetTier = 1 | 2;
 
 /**
  * A blocked request says what it carried, for the notice (never values):
- * tier 1 the number of emails that are not stand-ins, tier 2 the keyed
- * hashes of the masked-value forms found (at most MAX_BLOCKED_FORMS).
+ * tier 1 the number of emails that are not stand-ins and the keyed hashes
+ * of their compact forms, tier 2 the keyed hashes of the masked-value forms
+ * found (each at most MAX_BLOCKED_FORMS). The isolated side compares the
+ * hashes with values the user typed, and maps tier-2 forms to their types.
  */
 export type NetVerdict =
   | { block: false }
-  | { block: true; tier: 1; emails: number }
+  | { block: true; tier: 1; emails: number; forms: readonly string[] }
   | { block: true; tier: 2; forms: readonly string[] };
 
 const ALLOW: NetVerdict = { block: false };
@@ -120,26 +122,26 @@ export function violatesTier1(
   messageTexts: readonly string[],
   knowledge: NetKnowledge,
 ): boolean {
-  return tier1Emails(messageTexts, knowledge, true) > 0;
+  return tier1Emails(messageTexts, knowledge, true).size > 0;
 }
 
-/** Distinct emails in the texts that are not stand-ins. */
+/** Distinct emails in the texts that are not stand-ins (normalised). */
 function tier1Emails(
   messageTexts: readonly string[],
   knowledge: NetKnowledge,
   firstOnly: boolean,
-): number {
+): Set<string> {
   const found = new Set<string>();
   for (const text of messageTexts) {
     for (const span of detectEmails(text)) {
       const email = normaliseValue('email', span.value);
       if (!knowledge.standIns.has(email) && !knowledge.isStandIn(email)) {
         found.add(email);
-        if (firstOnly) return 1;
+        if (firstOnly) return found;
       }
     }
   }
-  return found.size;
+  return found;
 }
 
 /**
@@ -233,11 +235,14 @@ export function decideRequest(
   knowledge: NetKnowledge,
 ): NetVerdict {
   if (texts.user && violatesTier1(texts.user, knowledge)) {
-    return {
-      block: true,
-      tier: 1,
-      emails: tier1Emails(texts.user, knowledge, false),
-    };
+    const emails = tier1Emails(texts.user, knowledge, false);
+    const { matcher } = knowledge;
+    const forms = new Set<string>();
+    for (const email of emails) {
+      if (matcher === null || forms.size >= MAX_BLOCKED_FORMS) break;
+      forms.add(matcher.hash(compactForm(email)));
+    }
+    return { block: true, tier: 1, emails: emails.size, forms: [...forms] };
   }
   if (violatesTier2(texts.all, knowledge)) {
     return { block: true, tier: 2, forms: tier2Forms(texts.all, knowledge) };

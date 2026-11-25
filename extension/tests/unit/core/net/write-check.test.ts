@@ -110,11 +110,13 @@ describe('checkUserTexts', () => {
       block: false,
       possible: 0,
       items: [],
+      values: [],
     });
     expect(await check(['Reply to olivia.hughes@example.net'])).toEqual({
       block: false,
       possible: 0,
       items: [],
+      values: [],
     });
   });
 
@@ -126,6 +128,7 @@ describe('checkUserTexts', () => {
       block: false,
       possible: 1,
       items: [],
+      values: [],
     });
   });
 
@@ -137,11 +140,13 @@ describe('checkUserTexts', () => {
       block: true,
       possible: 0,
       items: [{ type: 'DOB', subtype: null, count: 1 }],
+      values: ['14/07/1986'],
     });
     expect(await check(['Meeting 14/07/1986'])).toEqual({
       block: false,
       possible: 0,
       items: [],
+      values: [],
     });
   });
 
@@ -169,7 +174,12 @@ describe('checkUserTexts', () => {
       needsMasking: () => true,
       isMaskedType: () => true,
     });
-    expect(result).toEqual({ block: false, possible: 0, items: [] });
+    expect(result).toEqual({
+      block: false,
+      possible: 0,
+      items: [],
+      values: [],
+    });
     expect(scan).toHaveBeenCalledTimes(2);
   });
 

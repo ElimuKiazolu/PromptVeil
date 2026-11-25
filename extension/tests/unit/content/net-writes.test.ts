@@ -53,14 +53,15 @@ function setUp(issued: readonly string[] = [RECIPIENT]) {
     immediate,
   );
   const asked: string[][] = [];
-  bridge.setVerifier((texts) => {
+  bridge.setVerifier(async (texts) => {
     asked.push([...texts]);
-    return checkUserTexts(texts, {
+    const result = await checkUserTexts(texts, {
       scan: (text) => runtime.scan(text),
       needsMasking: (found) =>
         needsMasking(found, TYPES, (value) => issued.includes(value)),
       isMaskedType: (found) => TYPES.has(found.type),
     });
+    return { ...result, hashes: [] };
   });
   pageScriptsMayRun(doc);
   bridge.sync([

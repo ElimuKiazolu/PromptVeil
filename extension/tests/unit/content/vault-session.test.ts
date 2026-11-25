@@ -29,6 +29,14 @@ import { FakeExtension, type FakeTab } from '../extension-fakes.ts';
 import { detectEmailsOnly } from '../spike-detect.ts';
 import { flush, pressKey, setUp as setUpPage } from './harness.ts';
 
+/**
+ * The mappings of whole values: email mappings also bring the name pieces
+ * a reply may derive from their local parts (tested in
+ * vault-session-names.test.ts).
+ */
+const wholeMappings = (session: VaultSession) =>
+  session.source.mappings().filter((m) => m.boundary !== 'derived');
+
 const CONV_ID = '6800a1b2-c3d4-4e5f-8a9b-0c1d2e3f4a5b';
 const OTHER_ID = '7900b2c3-d4e5-4f60-9b0c-1d2e3f4a5b6c';
 const THIRD_ID = '8a01c3d4-e5f6-4071-8c1d-2e3f4a5b6c7d';
@@ -112,12 +120,13 @@ function openSession(
       },
     },
     beforePublish: (mappings) => {
-      log.push(`net ${mappings.length.toString()}`);
+      const whole = mappings.filter((m) => m.boundary !== 'derived');
+      log.push(`net ${whole.length.toString()}`);
     },
     randomUUID: () => crypto.randomUUID(),
   });
   session.source.subscribe(() => {
-    log.push(`source ${session.source.mappings().length.toString()}`);
+    log.push(`source ${wholeMappings(session).length.toString()}`);
   });
   const controller = new AbortController();
   vaultLifecycle(session, tab.runtime, window).start(controller.signal);
@@ -147,8 +156,7 @@ const maskIn = async (session: VaultSession, items: MaskItem[]) =>
   ).map((standIn) => standIn.value);
 
 const realValues = (session: VaultSession) =>
-  session.source
-    .mappings()
+  wholeMappings(session)
     .map((mapping) => mapping.real)
     .sort();
 
@@ -183,7 +191,7 @@ describe('vault session', () => {
     await vi.waitFor(() => {
       expect(after.session.state().status).toBe('ready');
     });
-    expect(after.session.source.mappings()).toEqual([
+    expect(wholeMappings(after.session)).toEqual([
       {
         standIn,
         real: DANA.value,
@@ -214,7 +222,7 @@ describe('vault session', () => {
     expect(new Set(standIns).size).toBe(450);
     // Order is kept across batches.
     const byReal = new Map(
-      s.session.source.mappings().map((m) => [m.real, m.standIn]),
+      wholeMappings(s.session).map((m) => [m.real, m.standIn]),
     );
     expect(items.map((item) => byReal.get(item.value))).toEqual(standIns);
     // 450 values prepared, generated and stored one by one in
@@ -239,7 +247,7 @@ describe('vault session', () => {
       VaultSessionError,
     );
     // Nothing of the failed send is shown as issued.
-    expect(s.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(s.session)).toEqual([]);
   });
 
   it('rejects on every kind of vault failure', async () => {
@@ -292,7 +300,7 @@ describe('vault session', () => {
     await expect(maskIn(s.session, [DANA])).rejects.toBeInstanceOf(
       VaultSessionError,
     );
-    expect(s.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(s.session)).toEqual([]);
   });
 
   it('moves a new chat to the ID it receives and keeps its stand-ins', async () => {
@@ -304,7 +312,7 @@ describe('vault session', () => {
     expect(w.ext.sentToTabs).toEqual([]);
 
     s.navigate(CONV_URL);
-    expect(s.session.source.mappings()).toHaveLength(1);
+    expect(wholeMappings(s.session)).toHaveLength(1);
     expect(await maskIn(s.session, [DANA])).toEqual([standIn]);
     expect(s.requests).toContain('vault.migrate');
     await vi.waitFor(() => {
@@ -353,23 +361,21 @@ describe('vault session', () => {
     const s = openSession(w, CONV_URL);
     const [inConversation] = await maskIn(s.session, [DANA]);
     s.navigate(NEW_CHAT);
-    expect(s.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(s.session)).toEqual([]);
     expect(s.session.isIssued(inConversation ?? '')).toBe(false);
     const [inNewChat] = await maskIn(s.session, [DANA]);
     expect(inNewChat).not.toBe(inConversation);
 
     // The new chat receives its ID and keeps its stand-in.
     s.navigate(`https://chatgpt.com/c/${THIRD_ID}`);
-    expect(s.session.source.mappings().map((m) => m.standIn)).toEqual([
-      inNewChat,
-    ]);
+    expect(wholeMappings(s.session).map((m) => m.standIn)).toEqual([inNewChat]);
 
     // Switching between named conversations loads each one's mappings.
     s.navigate(OTHER_URL);
-    expect(s.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(s.session)).toEqual([]);
     s.navigate(CONV_URL);
     await vi.waitFor(() => {
-      expect(s.session.source.mappings().map((m) => m.standIn)).toEqual([
+      expect(wholeMappings(s.session).map((m) => m.standIn)).toEqual([
         inConversation,
       ]);
     });
@@ -389,7 +395,7 @@ describe('vault session', () => {
     await vi.waitFor(() => {
       expect(realValues(a.session)).toHaveLength(2);
     });
-    expect(c.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(c.session)).toEqual([]);
   });
 
   it('drops the values when its conversation is deleted', async () => {
@@ -400,15 +406,15 @@ describe('vault session', () => {
       name: 'vault.dropped',
       conversationIds: ['chatgpt:another-conv'],
     });
-    expect(s.session.source.mappings()).toHaveLength(1);
+    expect(wholeMappings(s.session)).toHaveLength(1);
     s.session.handleNotice({
       name: 'vault.dropped',
       conversationIds: [`chatgpt:${CONV_ID}`],
     });
-    expect(s.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(s.session)).toEqual([]);
     await maskIn(s.session, [DANA]);
     s.session.handleNotice({ name: 'vault.dropped', conversationIds: 'all' });
-    expect(s.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(s.session)).toEqual([]);
     expect(s.session.state().status).toBe('empty');
   });
 
@@ -417,7 +423,7 @@ describe('vault session', () => {
     const s = openSession(w, CONV_URL);
     await maskIn(s.session, [DANA]);
     s.session.clear();
-    expect(s.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(s.session)).toEqual([]);
     s.session.resume();
     await vi.waitFor(() => {
       expect(realValues(s.session)).toEqual([DANA.value]);
@@ -475,7 +481,7 @@ describe('vault session', () => {
     const s = openSession(w, CONV_URL);
     await maskIn(s.session, [DANA]);
     s.session.dispose();
-    expect(s.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(s.session)).toEqual([]);
     await expect(maskIn(s.session, [DANA])).rejects.toBeInstanceOf(
       VaultSessionError,
     );
@@ -511,7 +517,7 @@ describe('looking values up while the user types', () => {
     await vi.waitFor(() => {
       expect(reloaded.session.state().status).toBe('ready');
     });
-    expect(reloaded.session.source.mappings()).toEqual([]);
+    expect(wholeMappings(reloaded.session)).toEqual([]);
   });
 
   it('prepares what the peek did not cover, and a new chat on its first send', async () => {
@@ -617,6 +623,7 @@ describe('vault session in the page', () => {
     onVerdict: () => undefined,
     onReport: () => undefined,
     valueOfForm: () => null,
+    hashForm: (form: string) => form,
     sync: (mappings) => {
       synced.push(mappings.length);
     },

@@ -22,6 +22,11 @@
  * Vault operations run one at a time in the order they were asked for, so a
  * send always masks into the conversation its migration finished moving.
  */
+import type { LoadOutcome } from './unrestored-check.ts';
+import {
+  derivedNamePairs,
+  emailNameParts,
+} from '@/src/core/names/email-parts.ts';
 import type { SiteAdapter } from '@/src/adapters/types.ts';
 import { nameParts } from '@/src/core/names/parts.ts';
 import {
@@ -99,6 +104,8 @@ export interface VaultSessionOptions {
   beforePublish: (mappings: readonly StandInMapping[]) => void;
   /** New pending IDs (crypto.randomUUID). */
   randomUUID: () => string;
+  /** Told how each conversation load ended (diagnostics). */
+  onLoaded?: (outcome: LoadOutcome) => void;
 }
 
 export interface VaultSession {
@@ -148,18 +155,57 @@ function boundaryFor(type: EntityType, standIn: string): BoundaryRule {
 /** A value of the conversation as the session holds it. */
 interface Held extends IssuedValue {
   readonly mapping: StandInMapping;
-  /** PERSON: the stand-in's name parts, as stored or as just issued. */
+  /**
+   * PERSON: the stand-in's name parts; EMAIL: its local part's pieces (as
+   * stored or as just issued).
+   */
   readonly parts: readonly string[];
 }
 
 /**
  * Mappings for single name parts: each stand-in part (two letters or more)
- * that stands for exactly one real part across the conversation.
+ * that stands for exactly one real part across the conversation. PERSON
+ * parts restore as written (boundary 'name'); names derived from an email
+ * stand-in's local part also in lower case or capitalised ('derived').
  */
 function partMappings(held: Iterable<Held>): StandInMapping[] {
   const reals = new Map<string, Map<string, string>>();
   const shown = new Map<string, string>();
+  const fromPerson = new Set<string>();
+  const note = (part: string, real: string, person: boolean): void => {
+    const key = part.toLowerCase();
+    const forms = reals.get(key) ?? new Map<string, string>();
+    forms.set(real.toLowerCase(), real);
+    reals.set(key, forms);
+    if (person) {
+      fromPerson.add(key);
+      shown.set(key, part);
+    } else if (!shown.has(key)) {
+      shown.set(key, part);
+    }
+  };
+  // Real name pieces of the conversation: a derived piece equal to one of
+  // them could be a real name in the reply, so it is never restored.
+  const realPieces = new Set<string>();
   for (const value of held) {
+    const pieces =
+      value.type === 'PERSON'
+        ? nameParts(value.real)
+        : value.type === 'EMAIL'
+          ? emailNameParts(value.real)
+          : [];
+    for (const piece of pieces) {
+      realPieces.add(piece.toLowerCase().replace(/\p{N}+/gu, ''));
+    }
+  }
+  for (const value of held) {
+    if (value.type === 'EMAIL') {
+      for (const pair of derivedNamePairs(value.parts, value.real)) {
+        if (realPieces.has(pair.standIn.toLowerCase())) continue;
+        note(pair.standIn, pair.real, false);
+      }
+      continue;
+    }
     if (value.type !== 'PERSON') continue;
     const realParts = nameParts(value.real);
     if (realParts.length !== value.parts.length || realParts.length < 2) {
@@ -168,11 +214,7 @@ function partMappings(held: Iterable<Held>): StandInMapping[] {
     for (const [i, part] of value.parts.entries()) {
       const real = realParts[i];
       if (real === undefined || Array.from(part).length < 2) continue;
-      const key = part.toLowerCase();
-      const forms = reals.get(key) ?? new Map<string, string>();
-      forms.set(real.toLowerCase(), real);
-      reals.set(key, forms);
-      shown.set(key, part);
+      note(part, real, true);
     }
   }
   const out: StandInMapping[] = [];
@@ -182,8 +224,13 @@ function partMappings(held: Iterable<Held>): StandInMapping[] {
     if (forms.size !== 1 || standIn === undefined || real === undefined) {
       continue;
     }
-    // The whole name is what the request safety net checks.
-    out.push({ standIn, real, boundary: 'name', netForms: [] });
+    // The whole name (or address) is what the request safety net checks.
+    out.push({
+      standIn,
+      real,
+      boundary: fromPerson.has(key) ? 'name' : 'derived',
+      netForms: [],
+    });
   }
   return out;
 }
@@ -365,7 +412,12 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       type,
       real,
       standIn,
-      parts,
+      // Email mappings stored before P6.5 have no pieces: take the
+      // stand-in's own (its local part is not secret).
+      parts:
+        type === 'EMAIL' && parts.length === 0
+          ? emailNameParts(standIn)
+          : parts,
       mapping: {
         standIn,
         real,
@@ -408,12 +460,14 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       if (!result.ok) {
         status = 'error';
         devlog('session.failed', { reason: result.error });
+        options.onLoaded?.({ status: 'error', mappings: 0, failed: 0 });
         return;
       }
       const reply = result.value;
       if (reply.status !== 'ok') {
         status = reply.status === 'keys-lost' ? 'keys-lost' : 'error';
         devlog('session.failed', { reason: failureReason(reply) });
+        options.onLoaded?.({ status, mappings: 0, failed: 0 });
         return;
       }
       let added = 0;
@@ -434,6 +488,11 @@ export function createVaultSession(options: VaultSessionOptions): VaultSession {
       status = 'ready';
       devlog('session.loaded', { count: reply.mappings.length });
       if (added > 0) publish();
+      options.onLoaded?.({
+        status: 'ready',
+        mappings: reply.mappings.length,
+        failed,
+      });
     });
 
   /** Moves the pending chat; rejects when it could not be moved. */

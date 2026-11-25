@@ -33,8 +33,13 @@ const WHITESPACE = /\s/u;
 const MARKDOWN = /[*`#>[\]|~\\]/u;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-/** Long runs of URL-safe or base64 characters with no word structure. */
-const TOKEN = /^[A-Za-z0-9+/=_.:-]{16,}$/;
+/**
+ * Long runs of URL-safe or base64 characters with no word structure. "~" is
+ * an unreserved URL character that tokens carry too: ChatGPT's sentinel
+ * proof values end in "~S" (a base64 run with a "~" suffix read as markdown
+ * and scanned as free text, where the generic secret rule confirmed it).
+ */
+const TOKEN = /^[A-Za-z0-9+/=_.:~-]{16,}$/;
 const HAS_DIGIT = /\d/;
 const HAS_LETTER = /[A-Za-z]/;
 

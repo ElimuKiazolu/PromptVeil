@@ -193,6 +193,7 @@ describe('a Send before detection is ready', () => {
     onVerdict: () => undefined,
     onReport: () => undefined,
     valueOfForm: () => null,
+    hashForm: (form: string) => form,
   };
 
   function start(load: () => Promise<unknown>) {

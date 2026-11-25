@@ -20,8 +20,11 @@ export interface DescribedRequest {
 
 /** A write to the site itself and the text in it the user may have typed. */
 export interface WriteDescription {
-  /** A known surface, or 'write' for any other first-party write. */
-  readonly surface: WriteSurface | 'write';
+  /**
+   * A known surface, 'background' for the site's own background writes, or
+   * 'write' for any other first-party write.
+   */
+  readonly surface: WriteSurface | 'background' | 'write';
   /** On the adapter's skip list: no user text by evidence. */
   readonly skipped: boolean;
   /**
@@ -83,7 +86,11 @@ function describeWrite(
 ): WriteDescription {
   const { method } = request;
   const endpoint = rules.endpoints.find((e) => e.matches(url, method));
-  const surface = endpoint?.surface ?? 'write';
+  const surface =
+    endpoint?.surface ??
+    (rules.background.some((entry) => entry.matches(url, method))
+      ? 'background'
+      : 'write');
   const skipped = rules.skip.some((entry) => entry.matches(url, method));
   const raw: string[] = [];
   const fields: string[] = [];

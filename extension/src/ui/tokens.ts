@@ -16,6 +16,7 @@ export const COLOR_TOKENS = {
   mustard: '#b98a16',
   'mustard-ink': '#896610',
   brick: '#a3262a',
+  'brick-light': '#db6266',
 } as const;
 
 export type ColorToken = keyof typeof COLOR_TOKENS;

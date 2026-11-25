@@ -384,16 +384,27 @@ export interface Harness {
   close(): Promise<void>;
 }
 
+export interface LaunchOptions {
+  /** A profile that outlives the browser (restart checks); else a fresh one. */
+  readonly userDataDir?: string;
+  /** Collects the console lines here (e.g. the main harness's log book). */
+  readonly logs?: LogBook;
+}
+
 export async function launch(
   site: Site,
   extensionDir: string,
+  options: LaunchOptions = {},
 ): Promise<Harness> {
-  const logs = new LogBook();
+  const logs = options.logs ?? new LogBook();
   const browser = await puppeteer.launch({
     executablePath: findChrome(),
     headless: true,
     pipe: true,
     enableExtensions: [extensionDir],
+    ...(options.userDataDir === undefined
+      ? {}
+      : { userDataDir: options.userDataDir }),
     args: [
       `--host-resolver-rules=MAP ${SITE_HOST}:443 127.0.0.1:${site.port.toString()}, MAP ${OTHER_HOST}:443 127.0.0.1:${site.port.toString()}`,
       '--ignore-certificate-errors',

@@ -93,3 +93,13 @@ describe('notice board', () => {
     expect(board.pass('card:2')).toBeNull();
   });
 });
+
+describe('notice tone', () => {
+  it('is a warning before anything is stopped, an error once a write is', () => {
+    const { board } = setUp();
+    expect(board.warn('card:1', [EMAIL])).toMatchObject({ tone: 'warning' });
+    expect(board.block('card:1', 'card', 'found', [EMAIL])).toMatchObject({
+      tone: 'error',
+    });
+  });
+});

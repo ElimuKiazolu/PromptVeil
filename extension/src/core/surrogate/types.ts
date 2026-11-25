@@ -62,7 +62,8 @@ export interface StandIn {
   readonly fallback?: boolean;
   /**
    * Stored as the mapping's variants: PERSON, the stand-in's name parts (see
-   * nameParts); DOB, its day/month order; else empty.
+   * nameParts); EMAIL, its local part's pieces (see emailNameParts); DOB,
+   * its day/month order; else empty.
    */
   readonly parts: readonly string[];
 }

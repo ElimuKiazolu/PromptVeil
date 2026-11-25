@@ -173,10 +173,13 @@ export function parseVerdict(detail: unknown): NetVerdict | null {
 
 export type NetTransport = 'fetch' | 'xhr' | 'websocket' | 'beacon';
 /**
- * Known first-party surfaces ('message', 'writing-block'), any other
- * first-party write ('write'), or a request that is not one ('other').
+ * Known first-party surfaces ('message', 'writing-block'), the site's own
+ * background writes ('background': analytics, telemetry, anti-abuse; known
+ * by evidence, checked and blocked like any write but never shown), any
+ * other first-party write ('write'), or a request that is not one ('other').
  */
-export type NetCategory = 'message' | 'writing-block' | 'write' | 'other';
+export type NetCategory =
+  'message' | 'writing-block' | 'background' | 'write' | 'other';
 
 /** Why a request body (or part of it) was not read (src/net/body.ts). */
 export type NetSkipReason =
@@ -254,6 +257,7 @@ const TRANSPORTS: readonly string[] = ['fetch', 'xhr', 'websocket', 'beacon'];
 const CATEGORIES: readonly string[] = [
   'message',
   'writing-block',
+  'background',
   'write',
   'other',
 ];

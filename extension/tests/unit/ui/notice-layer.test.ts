@@ -53,8 +53,8 @@ describe('notice layer', () => {
   it('adds one host on the document root only while a notice shows', () => {
     const { layer, host } = setUp();
     expect(host()).toBeNull();
-    layer.show('a', CONTENT, { kind: 'page' }, true);
-    layer.show('b', CONTENT, { kind: 'page' }, false);
+    layer.show('a', CONTENT, { kind: 'page' }, true, 'warning');
+    layer.show('b', CONTENT, { kind: 'page' }, false, 'warning');
     expect(host()?.parentElement).toBe(document.documentElement);
     expect(
       document.documentElement.querySelectorAll('[data-promptveil-notices]'),
@@ -67,7 +67,7 @@ describe('notice layer', () => {
 
   it('shows the title and body as text, labelled, with a dismiss button', () => {
     const { layer, root } = setUp();
-    layer.show('a', CONTENT, { kind: 'page' }, false);
+    layer.show('a', CONTENT, { kind: 'page' }, false, 'warning');
     const notice = root().querySelector('section');
     expect(notice?.querySelector('.title')?.textContent).toBe(CONTENT.title);
     expect(notice?.querySelector('.body')?.textContent).toBe(CONTENT.body);
@@ -78,12 +78,13 @@ describe('notice layer', () => {
 
   it('updates a notice in place instead of adding another', () => {
     const { layer, root } = setUp();
-    layer.show('a', CONTENT, { kind: 'page' }, false);
+    layer.show('a', CONTENT, { kind: 'page' }, false, 'warning');
     layer.show(
       'a',
       { ...CONTENT, body: 'It has 2 emails.' },
       { kind: 'page' },
       false,
+      'warning',
     );
     const notices = root().querySelectorAll('section');
     expect(notices).toHaveLength(1);
@@ -94,11 +95,11 @@ describe('notice layer', () => {
 
   it('reads a notice out through the live region only when asked', () => {
     const { layer, root } = setUp();
-    layer.show('a', CONTENT, { kind: 'page' }, false);
+    layer.show('a', CONTENT, { kind: 'page' }, false, 'warning');
     const status = root().querySelector('[role="status"]');
     expect(status?.getAttribute('aria-live')).toBe('polite');
     expect(status?.textContent).toBe('');
-    layer.show('a', CONTENT, { kind: 'page' }, true);
+    layer.show('a', CONTENT, { kind: 'page' }, true, 'warning');
     expect(status?.textContent).toBe(`${CONTENT.title}. ${CONTENT.body}`);
   });
 
@@ -107,7 +108,7 @@ describe('notice layer', () => {
     const editor = document.createElement('textarea');
     document.body.append(editor);
     editor.focus();
-    layer.show('a', CONTENT, { kind: 'page' }, true);
+    layer.show('a', CONTENT, { kind: 'page' }, true, 'warning');
     expect(document.activeElement).toBe(editor);
     root().querySelector('button')?.click();
     expect(onDismiss).toHaveBeenCalledWith('a');
@@ -119,7 +120,7 @@ describe('notice layer', () => {
 
   it("follows the site's dark class", async () => {
     const { layer, root } = setUp();
-    layer.show('a', CONTENT, { kind: 'page' }, false);
+    layer.show('a', CONTENT, { kind: 'page' }, false, 'warning');
     const themed = root().querySelector('.layer');
     expect(themed?.getAttribute('data-theme')).toBe('light');
     document.documentElement.classList.add('dark');
@@ -130,14 +131,20 @@ describe('notice layer', () => {
   it('hides a card notice while its card is not on screen', () => {
     const { layer, root } = setUp();
     const card = document.createElement('div');
-    layer.show('card:1', CONTENT, { kind: 'card', anchor: card }, false);
+    layer.show(
+      'card:1',
+      CONTENT,
+      { kind: 'card', anchor: card },
+      false,
+      'warning',
+    );
     // Not connected (and jsdom gives no layout): treated as off screen.
     expect(root().querySelector('section')?.hidden).toBe(true);
   });
 
   it('removes everything on dispose', () => {
     const { layer, host } = setUp();
-    layer.show('a', CONTENT, { kind: 'page' }, false);
+    layer.show('a', CONTENT, { kind: 'page' }, false, 'warning');
     layer.dispose();
     expect(host()).toBeNull();
   });
@@ -150,5 +157,37 @@ describe('notice styles', () => {
     const rules = css.replace(/--color-[\w-]+: #[0-9a-f]{6};/g, '');
     expect(rules).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
     expect(css).toContain('--color-mustard-ink: #896610;');
+  });
+});
+
+describe('notice states', () => {
+  it('marks the tone on the notice: warning or error', () => {
+    const { layer, root } = setUp();
+    layer.show('a', CONTENT, { kind: 'page' }, false, 'warning');
+    expect(root().querySelector('section')?.getAttribute('data-tone')).toBe(
+      'warning',
+    );
+    layer.show('a', CONTENT, { kind: 'page' }, false, 'error');
+    expect(root().querySelector('section')?.getAttribute('data-tone')).toBe(
+      'error',
+    );
+  });
+
+  it('draws the state from the bottom edge, with no side bar', () => {
+    const css = noticeCss();
+    expect(css).not.toContain('border-left');
+    // The glow covers the bottom quarter and fades out at its top.
+    expect(css).toMatch(
+      /linear-gradient\(to top, color-mix\(in srgb, var\(--tone\) \d+%, transparent\), transparent 25%\)/,
+    );
+    // Error notices use Brick (light) and the lighter Brick (dark).
+    expect(css).toContain('--notice-error: var(--color-brick);');
+    expect(css).toContain('--notice-error: var(--color-brick-light);');
+    // No animation of the glow: only the entrance fade, and only without
+    // reduced motion.
+    expect(css.match(/animation:/g)).toHaveLength(1);
+    expect(css).toMatch(
+      /prefers-reduced-motion: no-preference\) \{\s*\.notice \{ animation/,
+    );
   });
 });

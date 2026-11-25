@@ -88,6 +88,16 @@ export interface NetSkip {
 }
 
 /**
+ * A first-party write the site makes on its own (analytics, telemetry,
+ * anti-abuse checks), known by its endpoint and body shape from evidence
+ * (a comment on each entry). It is checked and blocked exactly like any
+ * other write; only the notice is left out, since the user did not cause it.
+ */
+export interface NetBackground {
+  matches(url: URL, method: string): boolean;
+}
+
+/**
  * How the request safety net reads a site's requests. Pure data and
  * functions: the MAIN-world net uses them without any page DOM.
  *
@@ -103,6 +113,8 @@ export interface SiteNetRules {
   readonly endpoints: readonly NetEndpoint[];
   /** First-party writes known to carry no user text. */
   readonly skip: readonly NetSkip[];
+  /** The site's own background writes (no notice when blocked). */
+  readonly background: readonly NetBackground[];
 }
 
 export type AdapterErrorCode =

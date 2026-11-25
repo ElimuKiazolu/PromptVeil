@@ -56,6 +56,8 @@ describe('isTokenShaped', () => {
     'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl',
     '2026-11-21T10:15:00.000Z',
     'file-Ab12Cd34Ef56Gh78',
+    // A sentinel proof value: a base64 run with a "~S" suffix.
+    'gAAAAABWzE1vbiBOb3YgMjQgMjAyNiIsMC40MzIxXQ==~S',
   ])('%s is token-shaped', (value) => {
     expect(isTokenShaped(value)).toBe(true);
   });
@@ -67,6 +69,9 @@ describe('isTokenShaped', () => {
     'Europe/London',
     'auto',
     'AB123456C',
+    // Markdown strikethrough around typed text stays text.
+    '~~07400123456~~',
+    '~~call me~~',
   ])('%s is not token-shaped', (value) => {
     expect(isTokenShaped(value)).toBe(false);
   });
@@ -173,5 +178,22 @@ describe('keyNames', () => {
   it('has no keys for arrays, scalars and missing paths', () => {
     expect(keyNames([1, 2], ['a.b'])).toEqual([]);
     expect(keyNames('text')).toEqual([]);
+  });
+});
+
+describe('sentinel requests (P6.5 live finding)', () => {
+  it('select no user text from a proof ending in "~S" or a turnstile token', () => {
+    // Shapes as logged live: prepare_token, proofofwork, turnstile; values
+    // are made up here (base64 of fixed bytes).
+    const run = (n: number) =>
+      Buffer.from(Array.from({ length: n }, (_, i) => (i * 37) % 256)).toString(
+        'base64',
+      );
+    const body = {
+      prepare_token: `gAAAAAC${run(300)}`,
+      proofofwork: `gAAAAAB${run(400)}~S`,
+      turnstile: `${run(400)}~${run(400)}`,
+    };
+    expect(freeTextStrings(body)).toEqual([]);
   });
 });
