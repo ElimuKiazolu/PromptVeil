@@ -440,6 +440,14 @@ describe('ChatGPT URLs', () => {
     ['https://chatgpt.com/g/g-abc123-some-gpt', null],
     ['https://chatgpt.com/share/6710a1b2-0c3d-8000', null],
     ['https://chatgpt.com/c/', null],
+    // ChatGPT's placeholder before the server names a new chat (live,
+    // after an in-app New chat): a pending chat, never a conversation.
+    [
+      'https://chatgpt.com/c/local-chatgpt%3A4faef44a-a97e-44e0-bffe-01f3f7996504',
+      null,
+    ],
+    ['https://chatgpt.com/c/local-4faef44a-a97e-44e0-bffe-01f3f7996504', null],
+    ['https://chatgpt.com/c/LOCAL-4faef44a-a97e-44e0', null],
   ])('%s → %s', (url, expected) => {
     expect(conversationIdFromUrl(new URL(url))).toBe(expected);
   });
@@ -729,5 +737,96 @@ describe('ChatGPT card editors', () => {
       'Housewarming Invitation\n\nDear standin.1@example.net,',
     );
     expect(card.isEqualNode(before)).toBe(true);
+  });
+});
+
+describe('ChatGPT composers after in-app navigation (P6.6)', () => {
+  /**
+   * Two main composers in the page, as after an in-app "New chat": the
+   * previous one still mounted (hidden) before the new one.
+   */
+  function loadTwoComposers(): {
+    old: HTMLFormElement;
+    fresh: HTMLFormElement;
+  } {
+    loadComposer();
+    const old = document.querySelector<HTMLFormElement>(
+      'form[data-chatgpt-composer]',
+    );
+    if (!old) throw new Error('no composer');
+    const fresh = old.cloneNode(true) as HTMLFormElement;
+    old.setAttribute('hidden', '');
+    old.after(fresh);
+    return { old, fresh };
+  }
+
+  const editorOf = (form: HTMLFormElement): HTMLElement => {
+    const editor = form.querySelector<HTMLElement>('[contenteditable="true"]');
+    if (!editor) throw new Error('no editor');
+    return editor;
+  };
+
+  it('resolves a send to the composer it happened in, not the first one', () => {
+    const { old, fresh } = loadTwoComposers();
+    const adapter = createChatGptAdapter();
+    const composer = adapter.composerFor(editorOf(fresh));
+    expect(composer?.getEditor()).toBe(editorOf(fresh));
+    expect(composer?.getSendButton()).toBe(
+      fresh.querySelector('button[type="submit"]'),
+    );
+    expect(adapter.composerFor(editorOf(old))?.getEditor()).toBe(editorOf(old));
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true });
+    editorOf(fresh).dispatchEvent(enter);
+    // The interceptor's own check: a send of the fresh composer.
+    expect(sendEventComposer(adapter, enter)?.getEditor()).toBe(
+      editorOf(fresh),
+    );
+  });
+
+  it('clicks the Send button of that composer only', () => {
+    const { old, fresh } = loadTwoComposers();
+    const clicked: string[] = [];
+    old
+      .querySelector('button[type="submit"]')
+      ?.addEventListener('click', () => clicked.push('old'));
+    fresh
+      .querySelector('button[type="submit"]')
+      ?.addEventListener('click', () => clicked.push('fresh'));
+    const button = fresh.querySelector<HTMLButtonElement>(
+      'button[type="submit"]',
+    );
+    if (button) button.disabled = false;
+    createChatGptAdapter().composerFor(editorOf(fresh))?.triggerSend();
+    expect(clicked).toEqual(['fresh']);
+  });
+
+  it('takes the focused, else the shown composer as the main one', () => {
+    const { old, fresh } = loadTwoComposers();
+    const adapter = createChatGptAdapter();
+    expect(adapter.getMainComposer()?.getEditor()).toBe(editorOf(fresh));
+    old.removeAttribute('hidden');
+    editorOf(fresh).focus();
+    expect(adapter.getMainComposer()?.getEditor()).toBe(editorOf(fresh));
+  });
+
+  it('reports a removed composer as missing instead of using another', () => {
+    const { fresh } = loadTwoComposers();
+    const composer = createChatGptAdapter().composerFor(editorOf(fresh));
+    fresh.remove();
+    expect(() => composer?.readPrompt()).toThrow(AdapterError);
+  });
+
+  it('never takes a card editor for a composer when marked composers exist', () => {
+    loadComposer(
+      composerHtml +
+        readFileSync(
+          resolve('tests/fixtures/sites/chatgpt/reply-writing-block.html'),
+          'utf8',
+        ),
+    );
+    const card = document.querySelector(
+      '.writing-block-editor [contenteditable="true"]',
+    );
+    expect(createChatGptAdapter().composerFor(card)).toBeNull();
   });
 });

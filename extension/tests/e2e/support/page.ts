@@ -29,6 +29,8 @@ export interface PageApi {
   readonly cardSaves: string[];
   /** Chat renames: 'saved' or 'failed', in order. */
   readonly renames: string[];
+  /** Placeholder URLs (/c/local-…) the page showed, in order. */
+  readonly localUrls: string[];
   /** `pageshow` events: whether the page came from the back/forward cache. */
   readonly pageshows: boolean[];
   /** Message requests the page could not send (blocked or failed). */
@@ -69,6 +71,7 @@ export function pageMain(): void {
   const api: PageApi = {
     cardSaves: [],
     renames: [],
+    localUrls: [],
     pageshows: [],
     failedSends: 0,
     request: (request) => {
@@ -106,8 +109,11 @@ export function pageMain(): void {
   };
   Reflect.set(window, '__pv', api);
 
-  const idFromPath = (): string | null =>
-    /^\/c\/([A-Za-z0-9-]+)/.exec(location.pathname)?.[1] ?? null;
+  /** The server's conversation ID in the URL; a local placeholder is none. */
+  const idFromPath = (): string | null => {
+    const id = /^\/c\/([A-Za-z0-9-]+)$/.exec(location.pathname)?.[1] ?? null;
+    return id === null || id.startsWith('local-') ? null : id;
+  };
 
   /** The card text as ChatGPT's markdown serialiser writes it. */
   const markdown = (text: string): string => {
@@ -222,8 +228,38 @@ export function pageMain(): void {
     void list();
   };
 
+  /**
+   * ChatGPT's in-app "New chat": a fresh composer is mounted while the
+   * previous one stays in the page (hidden) before it, and the first send
+   * shows /c/local-chatgpt%3A<uuid> at once, before the server's ID.
+   */
+  let localIds = false;
+  const appNewChat = (): void => {
+    const forms = document.querySelectorAll('form[data-chatgpt-composer]');
+    const shown = Array.from(forms).find(
+      (form) => !form.hasAttribute('hidden'),
+    );
+    if (shown) {
+      const fresh = shown.cloneNode(true);
+      if (fresh instanceof HTMLFormElement) {
+        const editor = fresh.querySelector('[contenteditable="true"]');
+        if (editor) editor.textContent = '';
+        shown.setAttribute('hidden', '');
+        shown.after(fresh);
+      }
+    }
+    localIds = true;
+    history.pushState({}, '', '/');
+    show();
+  };
+
   document.addEventListener('click', (event) => {
     const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('#new-chat-app')) {
+      event.preventDefault();
+      appNewChat();
+      return;
+    }
     const link = target?.closest('a[href]');
     if (link) {
       event.preventDefault();
@@ -250,11 +286,19 @@ export function pageMain(): void {
     );
     if (!button) return;
     event.preventDefault();
-    const editor = document.querySelector(editorSel);
+    // The composer the button belongs to (there may be more than one).
+    const editor = button
+      .closest('form')
+      ?.querySelector('[contenteditable="true"]');
     const text = editor?.textContent ?? '';
     if (!editor || !text.trim()) return;
     editor.textContent = '';
     const startedIn = current;
+    if (startedIn === null && localIds) {
+      const local = `/c/local-chatgpt%3A${crypto.randomUUID()}`;
+      api.localUrls.push(local);
+      history.pushState({}, '', local);
+    }
     fetch('/backend-api/f/conversation', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -290,13 +334,11 @@ export function pageMain(): void {
   });
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;
-    const editor = document.querySelector(editorSel);
-    if (!editor || !(event.target instanceof Node)) return;
-    if (!editor.contains(event.target)) return;
+    if (!(event.target instanceof Element)) return;
+    const editor = event.target.closest(editorSel);
+    if (!editor) return;
     event.preventDefault();
-    const send = document.querySelector(
-      'form[data-chatgpt-composer] button[type="submit"]',
-    );
+    const send = editor.closest('form')?.querySelector('button[type="submit"]');
     if (send instanceof HTMLElement) send.click();
   });
   document.addEventListener('submit', (event) => {

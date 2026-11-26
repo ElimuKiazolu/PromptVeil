@@ -17,7 +17,9 @@ import puppeteer, {
 import type { PageApi, PageRequest, RequestOutcome } from './page.ts';
 import { OTHER_HOST, SITE_HOST, type Site } from './site.ts';
 
-export const EDITOR = 'form[data-chatgpt-composer] [contenteditable="true"]';
+/** The editor of the composer the page shows (others may be hidden). */
+export const EDITOR =
+  'form[data-chatgpt-composer]:not([hidden]) [contenteditable="true"]';
 const MESSAGE_PATH = '/backend-api/f/conversation';
 
 export const sleep = (ms: number): Promise<void> =>

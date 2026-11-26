@@ -16,6 +16,11 @@ import {
  * layouts. Localised attributes (aria-label) are deliberately not used.
  */
 const SELECTORS = {
+  // The main composer's form. In-app navigation (e.g. "New chat") can mount
+  // a new composer while the previous one is still in the page, so every
+  // event is resolved to the composer it happened in, never to the first
+  // composer of the document.
+  composerForm: ['form[data-chatgpt-composer]'],
   editor: [
     // Composer form marker plus the ProseMirror textbox inside it.
     'form[data-chatgpt-composer] [contenteditable="true"][role="textbox"]',
@@ -97,6 +102,7 @@ const USER_MESSAGE = SELECTORS.userMessage.join(', ');
 const ASSISTANT_MESSAGE = SELECTORS.assistantMessage.join(', ');
 const ANY_MESSAGE = `${USER_MESSAGE}, ${ASSISTANT_MESSAGE}`;
 const EDIT_FORM = SELECTORS.editForm.join(', ');
+const COMPOSER_FORM = SELECTORS.composerForm.join(', ');
 const CARD_CONTAINER = SELECTORS.cardContainer.join(', ');
 const EDITABLE_ROOT = SELECTORS.editableRoot.join(', ');
 
@@ -107,6 +113,15 @@ const HOSTNAME = 'chatgpt.com';
  * 8–128 characters, the vault's ChatGPT format (src/shared/conversation-id.ts).
  */
 const CONVERSATION_PATH = /(?:^|\/)c\/([A-Za-z0-9-]{8,128})(?:\/|$)/;
+
+/**
+ * ChatGPT's own placeholder for a chat the server has not named yet: right
+ * after the first send of an in-app "New chat" the URL shows
+ * /c/local-chatgpt%3A<uuid> (live, 58ee498) until the real /c/<id> arrives.
+ * Such a chat is still pending (TR-A5); any /c/ segment that is not a
+ * server ID (other characters, a "local-" prefix) reads as no ID.
+ */
+const LOCAL_ID = /^local-/i;
 
 /** ProseMirror adds this <br> to keep empty blocks open; it is not content. */
 const TRAILING_BREAK_CLASS = 'ProseMirror-trailingBreak';
@@ -202,7 +217,8 @@ function settle(): Promise<void> {
 }
 
 export function conversationIdFromUrl(url: URL): string | null {
-  return CONVERSATION_PATH.exec(url.pathname)?.[1] ?? null;
+  const id = CONVERSATION_PATH.exec(url.pathname)?.[1] ?? null;
+  return id === null || LOCAL_ID.test(id) ? null : id;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -392,12 +408,59 @@ export function createChatGptAdapter(doc: Document = document): ChatGptAdapter {
   const mainSendButton = (): HTMLElement | null =>
     queryFirst(doc, SELECTORS.sendButton, (el) => !isInEditForm(el));
 
-  const mainComposer = proseMirrorComposer(
+  /** Layouts without the form marker: the first main editor and button. */
+  const legacyComposer = proseMirrorComposer(
     doc,
     'main',
     mainEditor,
     mainSendButton,
   );
+
+  /**
+   * One composer per main composer form, bound to that form: its editor
+   * and Send button are looked up inside it on every call, so a composer
+   * the page removed reports its editor missing (the send fails closed)
+   * instead of reaching another composer.
+   */
+  const formComposers = new WeakMap<HTMLFormElement, Composer>();
+  const composerOfForm = (form: HTMLFormElement): Composer => {
+    let composer = formComposers.get(form);
+    if (composer === undefined) {
+      composer = proseMirrorComposer(
+        doc,
+        'main',
+        () => (form.isConnected ? queryFirst(form, SELECTORS.editor) : null),
+        () =>
+          form.isConnected ? queryFirst(form, SELECTORS.sendButton) : null,
+      );
+      formComposers.set(form, composer);
+    }
+    return composer;
+  };
+
+  const mainForms = (): HTMLFormElement[] =>
+    Array.from(doc.querySelectorAll<HTMLFormElement>(COMPOSER_FORM)).filter(
+      (form) => !isInEditForm(form),
+    );
+
+  /** Hidden by the page (kept mounted while another composer shows). */
+  const isHidden = (el: Element): boolean =>
+    el.closest('[hidden], [inert], [aria-hidden="true"]') !== null;
+
+  /**
+   * The composer the user works in: the one holding the focus, else the
+   * first one the page does not hide, else the first one.
+   */
+  const currentMainComposer = (): Composer | null => {
+    const forms = mainForms();
+    const active = doc.activeElement;
+    const chosen =
+      forms.find((form) => active !== null && form.contains(active)) ??
+      forms.find((form) => !isHidden(form)) ??
+      forms[0];
+    if (chosen !== undefined) return composerOfForm(chosen);
+    return mainEditor() ? legacyComposer : null;
+  };
 
   const editComposer = (form: HTMLFormElement): Composer | null => {
     const editor = queryFirst(form, SELECTORS.editEditor);
@@ -416,7 +479,7 @@ export function createChatGptAdapter(doc: Document = document): ChatGptAdapter {
 
     matches: (url) => url.hostname === HOSTNAME,
 
-    getMainComposer: () => (mainEditor() ? mainComposer : null),
+    getMainComposer: currentMainComposer,
 
     composerFor(target) {
       const el =
@@ -431,15 +494,24 @@ export function createChatGptAdapter(doc: Document = document): ChatGptAdapter {
       const editForm = el.closest<HTMLFormElement>(EDIT_FORM);
       if (editForm) return editComposer(editForm);
 
+      // The composer form the event happened in, whichever composer of
+      // the page that is.
+      const form = el.closest<HTMLFormElement>(COMPOSER_FORM);
+      if (form) return composerOfForm(form);
+      // With marked composers on the page, anything outside them (a card
+      // editor, the page) is not a composer.
+      if (mainForms().length > 0) return null;
+
+      // Earlier layouts without the form marker: the first main editor.
       const editor = mainEditor();
       if (!editor) return null;
-      const form = editor.closest('form');
+      const legacyForm = editor.closest('form');
       const button = mainSendButton();
       const inMain =
         editor.contains(el) ||
-        (form?.contains(el) ?? false) ||
+        (legacyForm?.contains(el) ?? false) ||
         (button?.contains(el) ?? false);
-      return inMain ? mainComposer : null;
+      return inMain ? legacyComposer : null;
     },
 
     getConversationId: () => conversationIdFromUrl(new URL(doc.location.href)),

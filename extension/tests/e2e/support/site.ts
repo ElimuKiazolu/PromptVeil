@@ -93,7 +93,7 @@ function chatPage(): string {
     /(<p class="TextBase-hXhSqg Text-lIMP0_" data-d-text-flow="" data-d-component="text">)[^<]*<\//,
   );
   return `<!doctype html><html><head><meta charset="utf-8"><title>ChatGPT</title></head><body>
-<nav id="sidebar"><a href="/" id="new-chat">New chat</a><div id="rename"><input id="rename-input" aria-label="Chat name"><button id="rename-save" type="button">Rename</button></div><div id="convs"></div></nav>
+<nav id="sidebar"><a href="/" id="new-chat">New chat</a><button type="button" id="new-chat-app">New chat (in app)</button><div id="rename"><input id="rename-input" aria-label="Chat name"><button id="rename-save" type="button">Rename</button></div><div id="convs"></div></nav>
 <main id="thread"></main>
 <template id="tpl-user">${user}</template>
 <template id="tpl-reply">${reply}</template>

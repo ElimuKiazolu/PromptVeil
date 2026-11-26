@@ -326,6 +326,30 @@ describe('vault session', () => {
     });
   });
 
+  it('keeps a new chat pending through ChatGPT’s local placeholder IDs (P6.6)', async () => {
+    const w = world();
+    // An existing chat, then the in-app "New chat".
+    const s = openSession(w, CONV_URL);
+    s.navigate(NEW_CHAT);
+    const [standIn] = await maskIn(s.session, [DANA]);
+    // ChatGPT shows its placeholder right after the send, then the real ID.
+    for (const local of [
+      'https://chatgpt.com/c/local-chatgpt%3A4faef44a-a97e-44e0-bffe-01f3f7996504',
+      'https://chatgpt.com/c/local-4faef44a-a97e-44e0-bffe-01f3f7996504',
+    ]) {
+      s.navigate(local);
+      expect(s.requests).not.toContain('vault.migrate');
+      expect(wholeMappings(s.session)).toHaveLength(1);
+    }
+    s.navigate(OTHER_URL);
+    expect(await maskIn(s.session, [DANA])).toEqual([standIn]);
+    expect(s.requests).toContain('vault.migrate');
+    const reloaded = openSession(w, OTHER_URL);
+    await vi.waitFor(() => {
+      expect(realValues(reloaded.session)).toEqual([DANA.value]);
+    });
+  });
+
   it('does not migrate a new chat that never masked anything', async () => {
     const w = world();
     const s = openSession(w, NEW_CHAT);
